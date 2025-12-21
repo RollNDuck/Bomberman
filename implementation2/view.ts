@@ -1,13 +1,12 @@
-import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, GAME_DURATION } from "./model"
+import { Array as EffectArray } from "effect"
+import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, GAME_DURATION, FPS } from "./model"
 import { Msg } from "./msg"
 import { h } from "cs12251-mvu/src"
 
 export const view = (model: Model, dispatch: (msg: Msg) => void) => {
-    const elapsed = Math.floor(model.currentTime / 30)
-    const remaining = Math.max(0, GAME_DURATION - elapsed)
-    const minutes = Math.floor(remaining / 60)
-    const seconds = remaining % 60
-    const timeStr = `${minutes.toString().padStart(1, '0')}:${seconds.toString().padStart(2, '0')}`
+    const timeToDisplay = model.state === "warmup" ? model.roundTimer : model.roundTimer
+    const seconds = Math.ceil(timeToDisplay / FPS)
+    const timeStr = model.state === "warmup" ? `Start: ${seconds}` : `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`
 
     return h("div", {
         style: {
@@ -20,74 +19,46 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
             padding: "20px"
         }
     }, [
-        // --- SCOREBOARD / HEADER ---
+        // --- SCOREBOARD ---
         h("div", {
             style: {
                 display: "flex", justifyContent: "space-between", alignItems: "center",
                 width: `${GRID_COLS * CELL_SIZE}px`,
                 backgroundColor: "#00AAAA",
-                border: "3px solid #ECECEC",
-                borderBottom: "3px solid #000",
-                padding: "5px 15px",
-                marginBottom: "0px",
-                boxSizing: "border-box",
-                height: "50px"
+                border: "3px solid #ECECEC", borderBottom: "3px solid #000",
+                padding: "5px 15px", marginBottom: "0px", boxSizing: "border-box", height: "50px"
             }
         }, [
-            // Timer
-            h("div", { style: { display: "flex", alignItems: "center" } }, [
-                 h("div", {
-                     style: {
-                         width: "24px", height: "24px", borderRadius: "50%",
-                         backgroundColor: "#D32F2F", border: "2px solid #5D4037",
-                         marginRight: "8px", position: "relative"
-                     }
-                 }, [
-                     h("div", { style: { position: "absolute", top: "-3px", left: "9px", width: "4px", height: "3px", backgroundColor: "#FFD700" } }),
-                     h("div", { style: { position: "absolute", top: "4px", left: "10px", width: "2px", height: "8px", backgroundColor: "#fff", transform: "rotate(45deg)" } })
-                 ]),
+            // Left: Round & Time
+            h("div", { style: { display: "flex", alignItems: "center", fontWeight: "bold", color: "#FFF" } }, [
+                 h("div", { style: { marginRight: "10px" } }, `R${model.roundNumber}`),
                  h("div", {
                      style: {
                          backgroundColor: "#000", color: "#fff", padding: "2px 5px",
                          fontFamily: "monospace", fontSize: "20px", fontWeight: "bold",
-                         border: "2px solid #ECECEC", textShadow: "1px 1px 0 #000"
+                         border: "2px solid #ECECEC"
                      }
                  }, timeStr)
             ]),
-
-            // Players Section (Mini Heads + Wins)
-            h("div", { style: { display: "flex", gap: "20px" } },
-                model.players.map(p =>
-                    h("div", { style: { display: "flex", alignItems: "center" } }, [
+            // Right: Players
+            h("div", { style: { display: "flex", gap: "10px" } },
+                EffectArray.map(model.players, p =>
+                    h("div", { style: { display: "flex", alignItems: "center", opacity: p.isAlive ? 1 : 0.5 } }, [
                         h("div", {
                             style: {
-                                width: "24px", height: "22px",
-                                backgroundColor: p.color,
-                                border: "2px solid #000",
-                                borderRadius: "6px 6px 8px 8px",
-                                marginRight: "5px",
-                                position: "relative",
-                                display: "flex", justifyContent: "center", alignItems: "center"
+                                width: "20px", height: "20px", backgroundColor: p.color,
+                                border: "2px solid #000", borderRadius: "50%", marginRight: "5px"
                             }
-                        }, [
-                            h("div", { style: { width: "14px", height: "10px", backgroundColor: "#FFCC99", borderRadius: "2px", border: "1px solid #000" } }, [
-                                h("div", { style: { width: "2px", height: "4px", backgroundColor: "#000", position: "absolute", top: "8px", left: "6px" } }),
-                                h("div", { style: { width: "2px", height: "4px", backgroundColor: "#000", position: "absolute", top: "8px", right: "6px" } })
-                            ])
-                        ]),
+                        }),
                         h("div", {
-                            style: {
-                                backgroundColor: "#000", color: "#fff", width: "20px", height: "20px",
-                                display: "flex", justifyContent: "center", alignItems: "center",
-                                fontSize: "14px", fontWeight: "bold", border: "2px solid #ECECEC"
-                            }
+                            style: { backgroundColor: "#000", color: "#fff", padding: "0 5px", border: "1px solid #fff" }
                         }, p.wins.toString())
                     ])
                 )
             )
         ]),
 
-        // Game Area
+        // --- GAME AREA ---
         h("div", {
             style: {
                 position: "relative",
@@ -101,9 +72,45 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
             renderBombs(model),
             renderExplosions(model),
             renderPlayers(model),
+            renderOverlays(model), // New: Phase 5 Overlays
             model.gamePhase === "gameOver" ? renderGameOver(model) : null
         ].flat().filter(Boolean))
     ])
+}
+
+const renderOverlays = (model: Model) => {
+    // Warmup Countdown
+    if (model.state === "warmup") {
+        const count = Math.ceil(model.roundTimer / FPS)
+        return h("div", {
+            style: {
+                position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                display: "flex", justifyContent: "center", alignItems: "center",
+                backgroundColor: "rgba(0,0,0,0.3)", color: "#FFF", fontSize: "100px", fontWeight: "bold",
+                textShadow: "4px 4px #000", zIndex: 100
+            }
+        }, count.toString())
+    }
+
+    // Round Over / Match Over Screen
+    if (model.state === "roundOver" || model.state === "matchOver") {
+        const title = model.state === "matchOver" ? "MATCH OVER" : "ROUND OVER"
+        const sub = model.roundWinner === "Draw" ? "Draw!" : `${model.roundWinner} Wins!`
+        const help = model.state === "matchOver" ? "Champion!" : "Press ESC"
+
+        return h("div", {
+            style: {
+                position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
+                backgroundColor: "rgba(0,0,0,0.85)", color: "#FFF", zIndex: 100
+            }
+        }, [
+            h("h1", { style: { fontSize: "60px", color: "#FFD700", marginBottom: "20px" } }, title),
+            h("h2", { style: { fontSize: "40px", marginBottom: "40px" } }, sub),
+            h("p", { style: { fontSize: "20px" } }, help)
+        ])
+    }
+    return null
 }
 
 const renderGrid = (model: Model) => {
@@ -168,7 +175,7 @@ const renderGrid = (model: Model) => {
 }
 
 const renderBombs = (model: Model) => {
-    return model.bombs.map(bomb => {
+    return EffectArray.map(model.bombs, bomb => {
         const frame = Math.floor(model.currentTime / 5) % 2
         const size = frame === 0 ? 30 : 34
         return h("div", {
@@ -205,7 +212,7 @@ const renderExplosions = (model: Model) => {
 }
 
 const renderPlayers = (model: Model) => {
-    return model.players.map(p => {
+    return EffectArray.map(model.players, p => {
         if (!p.isAlive) return null
 
         const accessoryColor = "#E6005C", faceColor = "#FFCC99", beltColor = "#F0F0F0"
@@ -230,9 +237,7 @@ const renderPlayers = (model: Model) => {
                 filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.4))",
             }
         }, [
-            // Pom
             h("div", { style: { width: "6px", height: "6px", backgroundColor: accessoryColor, borderRadius: "50%", border: "1px solid #000", position: "absolute", top: "1px", zIndex: "25", left: isSide ? (isRight ? "10px" : "24px") : "17px" } }),
-            // Helmet
             h("div", {
                 style: { width: "22px", height: "20px", backgroundColor: p.color, borderRadius: "6px 6px 8px 8px", border: "2px solid #000", position: "absolute", top: "5px", zIndex: "24", display: "flex", justifyContent: "center", alignItems: "center", transform: isRight && isSide ? "scaleX(-1)" : "none" }
             }, [
@@ -241,14 +246,11 @@ const renderPlayers = (model: Model) => {
                     !isSide ? h("div", { style: { width: "2px", height: "5px", backgroundColor: "#000", position: "absolute", top: "1px", right: "2px" } }) : null
                 ]) : null
             ]),
-            // Body
             h("div", { style: { width: isSide ? "12px" : "16px", height: "11px", backgroundColor: p.subColor, border: "2px solid #000", borderRadius: "3px", position: "absolute", top: "23px", zIndex: "23", display: "flex", justifyContent: "center", alignItems: "center" } }, [
                 h("div", { style: { width: "100%", height: "3px", backgroundColor: beltColor, marginTop: "4px" } })
             ]),
-            // Hands
             h("div", { style: { width: "7px", height: "7px", backgroundColor: accessoryColor, borderRadius: "50%", border: "1px solid #000", position: "absolute", top: leftHandTop, left: isSide ? "14px" : "4px", zIndex: "26", display: (isSide && isRight) ? "none" : "block" } }),
             h("div", { style: { width: "7px", height: "7px", backgroundColor: accessoryColor, borderRadius: "50%", border: "1px solid #000", position: "absolute", top: rightHandTop, right: isSide ? "14px" : "4px", zIndex: "26", display: (isSide && !isRight) ? "none" : "block" } }),
-            // Feet
             h("div", { style: { width: "8px", height: "6px", backgroundColor: accessoryColor, borderRadius: "3px", border: "1px solid #000", position: "absolute", top: leftFootTop, left: "8px", zIndex: "23", transition: "top 0.1s" } }),
             h("div", { style: { width: "8px", height: "6px", backgroundColor: accessoryColor, borderRadius: "3px", border: "1px solid #000", position: "absolute", top: rightFootTop, right: "8px", zIndex: "23", transition: "top 0.1s" } }),
         ])

@@ -1,6 +1,6 @@
 import { Match, Array as EffectArray, Option } from "effect"
 import { Msg } from "./msg"
-import { Model, Player, Bomb, Explosion, Position, Cell, GRID_ROWS, GRID_COLS, FPS, GAME_DURATION, BOMB_TIMER, EXPLOSION_DURATION, SPEED_INCREMENT, DESTRUCTION_DELAY } from "./model"
+import { Model, Player, Bomb, Explosion, Position, Cell, GRID_ROWS, GRID_COLS, FPS, GAME_DURATION, BOMB_TIMER, EXPLOSION_DURATION, SPEED_INCREMENT, DESTRUCTION_DELAY, WARMUP_SECONDS, createGrid } from "./model"
 import settings from "./settings.json"
 
 const P1_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", bomb: " " }
@@ -16,37 +16,33 @@ export const update = (msg: Msg, model: Model): Model => {
 }
 
 const handleKeyDown = (key: string, model: Model): Model => {
-    if (model.gamePhase !== "playing") return model
+    // Phase 5 Inputs
+    if (key === "Escape" && model.state === "roundOver") return startNextRound(model)
+    if (key === "Escape" && model.state === "playing") return Model.make({ ...model, isDebugMode: !model.isDebugMode })
+
+    if (model.state !== "playing") return model
+
     const newKeys = new Set(model.keys)
     newKeys.add(key)
 
-    // Check if any human player plants a bomb
-    // We iterate immutably over players to find if one planted a bomb
-    const bombToPlant = EffectArray.findFirst(model.players, p => {
-        if (!p.isHuman || !p.isAlive) return false
-        let bombKey = ""
-        if (p.id === 1) bombKey = P1_KEYS.bomb
-        if (p.id === 2) bombKey = P2_KEYS.bomb
-        return key === bombKey && canPlantBomb(p, model.bombs)
+    // Immutable Bomb Planting
+    const updates = EffectArray.reduce(model.players, { players: [] as Player[], bombs: model.bombs }, (acc, p) => {
+        if (!p.isHuman || !p.isAlive) return { ...acc, players: EffectArray.append(acc.players, p) }
+
+        let bombKey = (p.id === 1) ? P1_KEYS.bomb : (p.id === 2 ? P2_KEYS.bomb : "")
+        if (key === bombKey && canPlantBomb(p, acc.bombs)) {
+            const bomb = createBomb(p, model.currentTime)
+            if (!isBombAt(bomb.position, acc.bombs)) {
+                return {
+                    players: EffectArray.append(acc.players, Player.make({ ...p, activeBombs: p.activeBombs + 1 })),
+                    bombs: EffectArray.append(acc.bombs, bomb)
+                }
+            }
+        }
+        return { ...acc, players: EffectArray.append(acc.players, p) }
     })
 
-    // If a player wants to plant, we update state
-    return Match.value(bombToPlant).pipe(
-        Match.tag("Some", ({ value: p }) => {
-            const bomb = createBomb(p, model.currentTime)
-            if (!isBombAt(bomb.position, model.bombs)) {
-                // Update players (increment active bombs) and bombs list
-                const newPlayers = EffectArray.map(model.players, player =>
-                    player.id === p.id ? Player.make({ ...player, activeBombs: player.activeBombs + 1 }) : player
-                )
-                const newBombs = EffectArray.append(model.bombs, bomb)
-                return Model.make({ ...model, keys: newKeys, bombs: newBombs, players: newPlayers })
-            }
-            return Model.make({ ...model, keys: newKeys })
-        }),
-        Match.tag("None", () => Model.make({ ...model, keys: newKeys })),
-        Match.exhaustive
-    )
+    return Model.make({ ...model, keys: newKeys, bombs: updates.bombs, players: updates.players })
 }
 
 const handleKeyUp = (key: string, model: Model): Model => {
@@ -56,15 +52,21 @@ const handleKeyUp = (key: string, model: Model): Model => {
 }
 
 const handleTick = (model: Model): Model => {
-    if (model.gamePhase !== "playing") return model
+    const currentTime = model.currentTime + 1
 
-    let newModel = { ...model }
-    newModel.currentTime = model.currentTime + 1
-
-    const elapsedSeconds = newModel.currentTime / FPS
-    if (elapsedSeconds >= GAME_DURATION) {
-        return endGame(newModel, "Draw (Time's Up!)")
+    // 1. WARMUP
+    if (model.state === "warmup") {
+        const remaining = model.roundTimer - 1
+        if (remaining <= 0) return Model.make({ ...model, state: "playing", roundTimer: GAME_DURATION * FPS, currentTime })
+        return Model.make({ ...model, roundTimer: remaining, currentTime })
     }
+
+    if (model.state === "roundOver" || model.state === "matchOver") return model
+
+    // 2. PLAYING
+    let newModel = Model.make({ ...model, currentTime, roundTimer: model.roundTimer - 1 })
+
+    if (newModel.roundTimer <= 0) return endRound(newModel, "Draw")
 
     newModel.grid = updateGridTimers(newModel.grid)
     newModel = updateBots(newModel)
@@ -73,80 +75,112 @@ const handleTick = (model: Model): Model => {
 
     const bombResult = updateBombsAndExplosions(newModel)
     newModel = { ...newModel, ...bombResult }
+
+    // UPDATED: Check Deaths with 4-corner logic
     newModel = checkDeaths(newModel)
 
-    return Model.make(newModel)
+    return checkRoundEnd(newModel)
 }
 
-const updateBots = (model: Model): Model => {
-    if (model.currentTime % 30 !== 0) return model
+// --- ROUND LOGIC ---
 
-    // Purely transform players array
+const checkRoundEnd = (model: Model): Model => {
+    const alivePlayers = EffectArray.filter(model.players, p => p.isAlive)
+    if (alivePlayers.length === 0) return endRound(model, "Draw")
+    if (alivePlayers.length === 1) return endRound(model, alivePlayers[0].label)
+    return model
+}
+
+const endRound = (model: Model, winnerLabel: string): Model => {
+    const newPlayers = EffectArray.map(model.players, p =>
+        p.label === winnerLabel ? Player.make({ ...p, wins: p.wins + 1 }) : p
+    )
+
+    // Check Match Winner
+    const matchWinner = EffectArray.findFirst(newPlayers, p => p.wins >= settings.roundsToWin)
+
+    return Match.value(matchWinner).pipe(
+        Match.tag("Some", ({ value: winner }) =>
+            Model.make({ ...model, players: newPlayers, state: "matchOver", roundWinner: winner.label })
+        ),
+        Match.tag("None", () =>
+            Model.make({ ...model, players: newPlayers, state: "roundOver", roundWinner: winnerLabel })
+        ),
+        Match.exhaustive
+    )
+}
+
+const startNextRound = (model: Model): Model => {
+    return Model.make({
+        ...model,
+        grid: createGrid(),
+        bombs: [],
+        explosions: [],
+        keys: new Set(),
+        state: "warmup",
+        roundTimer: WARMUP_SECONDS * FPS,
+        roundNumber: model.roundNumber + 1,
+        isDebugMode: false,
+        players: EffectArray.map(model.players, p => Player.make({
+            ...p,
+            position: p.startPosition,
+            isAlive: true,
+            activeBombs: 0,
+            aiDirection: null,
+            direction: "down",
+            isMoving: false,
+            // Keep upgrades? Standard usually resets, but let's reset to keep it fair/simple
+            speed: BASE_SPEED,
+            bombRange: 1,
+            maxBombs: 1
+        }))
+    })
+}
+
+// --- GAMEPLAY HELPERS ---
+
+const updateBots = (model: Model): Model => {
+    if (model.currentTime % 15 !== 0) return model
+
     const newPlayers = EffectArray.map(model.players, p => {
         if (!p.isAlive || p.isHuman) return p
-
         let updatedBot = { ...p }
 
-        // 1. Bot Move Logic (Random)
-        if (Math.random() * 100 < settings.botMoveChance) {
-            const possibleDirs: ("up" | "down" | "left" | "right")[] = ["up", "down", "left", "right"]
-            const validDirs = EffectArray.filter(possibleDirs, d => {
-                const r = Math.round(p.position.row)
-                const c = Math.round(p.position.col)
-                let targetR = r, targetC = c
-                if (d === "up") targetR--
-                if (d === "down") targetR++
-                if (d === "left") targetC--
-                if (d === "right") targetC++
-
-                if (targetR < 0 || targetR >= GRID_ROWS || targetC < 0 || targetC >= GRID_COLS) return false
-                const cell = model.grid[targetR][targetC]
-                if (cell.type !== "empty") return false
-                if (EffectArray.some(model.bombs, b => Math.round(b.position.row) === targetR && Math.round(b.position.col) === targetC)) return false
-                return true
-            })
-
-            if (validDirs.length > 0) {
-                const idx = Math.floor(Math.random() * validDirs.length)
-                updatedBot.aiDirection = validDirs[idx]
-            } else {
-                updatedBot.aiDirection = null
-            }
+        if (Math.random() < 0.5) {
+            const possibleDirs: ("up"|"down"|"left"|"right")[] = ["up", "down", "left", "right"]
+            const valid = EffectArray.filter(possibleDirs, d => isSafeMove(p.position, d, model))
+            if (valid.length > 0) updatedBot.aiDirection = valid[Math.floor(Math.random() * valid.length)]
         }
         return Player.make(updatedBot)
     })
 
-    // Separate Pass for Planting (State dependent)
-    // To strictly follow immutable flow, we could fold, but simple map + check is okay if collisions rare
-    // We will just return the player updates for now. Complex bomb planting logic for bots involves checking the updated `newPlayers` against `model.bombs`
-
-    // Simplification for immutable example: Bots effectively decide intent, state updates in next tick or refactored.
-    // Here we just plant if possible using current state.
-
-    // We need to return both potential new bombs and players
-    // This is tricky with simple map. We'll use a reduce to accumulate changes.
-
+    // Bot Bomb Logic
     const botUpdate = EffectArray.reduce(newPlayers, { players: [] as Player[], bombs: model.bombs }, (acc, p) => {
-        if (!p.isAlive || p.isHuman) {
-            return { ...acc, players: EffectArray.append(acc.players, p) }
-        }
+        if (!p.isAlive || p.isHuman) return { ...acc, players: EffectArray.append(acc.players, p) }
 
         let currentP = p
         let currentBombs = acc.bombs
 
-        if (Math.random() * 100 < settings.botBombChance) {
-            if (canPlantBomb(p, currentBombs)) {
-                const bomb = createBomb(p, model.currentTime)
-                if (!isBombAt(bomb.position, currentBombs)) {
-                    currentBombs = EffectArray.append(currentBombs, bomb)
-                    currentP = Player.make({ ...p, activeBombs: p.activeBombs + 1 })
-                }
-            }
+        // 10% chance to plant if safe
+        if (Math.random() < 0.1 && canPlantBomb(p, currentBombs)) {
+             const bomb = createBomb(p, model.currentTime)
+             if (!isBombAt(bomb.position, currentBombs)) {
+                 currentBombs = EffectArray.append(currentBombs, bomb)
+                 currentP = Player.make({ ...p, activeBombs: p.activeBombs + 1 })
+             }
         }
         return { players: EffectArray.append(acc.players, currentP), bombs: currentBombs }
     })
 
     return { ...model, players: botUpdate.players, bombs: botUpdate.bombs }
+}
+
+const isSafeMove = (pos: Position, dir: string, model: Model): boolean => {
+    let r = Math.round(pos.row), c = Math.round(pos.col)
+    if (dir === "up") r--; if (dir === "down") r++; if (dir === "left") c--; if (dir === "right") c++
+    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false
+    const cell = model.grid[r][c]
+    return cell.type === "empty" && !cell.hasExplosion && !isBombAt({row:r, col:c}, model.bombs)
 }
 
 const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): Player => {
@@ -158,21 +192,21 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
 
     if (player.isHuman) {
         if (player.id === 1) {
-            if (keys.has(P1_KEYS.up)) { dRow -= player.speed; newDir = "up"; isMoving = true; }
-            if (keys.has(P1_KEYS.down)) { dRow += player.speed; newDir = "down"; isMoving = true; }
-            if (keys.has(P1_KEYS.left)) { dCol -= player.speed; newDir = "left"; isMoving = true; }
-            if (keys.has(P1_KEYS.right)) { dCol += player.speed; newDir = "right"; isMoving = true; }
+            if (keys.has(P1_KEYS.up)) { dRow -= player.speed; newDir = "up"; isMoving = true }
+            if (keys.has(P1_KEYS.down)) { dRow += player.speed; newDir = "down"; isMoving = true }
+            if (keys.has(P1_KEYS.left)) { dCol -= player.speed; newDir = "left"; isMoving = true }
+            if (keys.has(P1_KEYS.right)) { dCol += player.speed; newDir = "right"; isMoving = true }
         } else if (player.id === 2) {
-            if (keys.has(P2_KEYS.up)) { dRow -= player.speed; newDir = "up"; isMoving = true; }
-            if (keys.has(P2_KEYS.down)) { dRow += player.speed; newDir = "down"; isMoving = true; }
-            if (keys.has(P2_KEYS.left)) { dCol -= player.speed; newDir = "left"; isMoving = true; }
-            if (keys.has(P2_KEYS.right)) { dCol += player.speed; newDir = "right"; isMoving = true; }
+            if (keys.has(P2_KEYS.up)) { dRow -= player.speed; newDir = "up"; isMoving = true }
+            if (keys.has(P2_KEYS.down)) { dRow += player.speed; newDir = "down"; isMoving = true }
+            if (keys.has(P2_KEYS.left)) { dCol -= player.speed; newDir = "left"; isMoving = true }
+            if (keys.has(P2_KEYS.right)) { dCol += player.speed; newDir = "right"; isMoving = true }
         }
     } else {
-        if (player.aiDirection === "up") { dRow -= player.speed; newDir = "up"; isMoving = true; }
-        if (player.aiDirection === "down") { dRow += player.speed; newDir = "down"; isMoving = true; }
-        if (player.aiDirection === "left") { dCol -= player.speed; newDir = "left"; isMoving = true; }
-        if (player.aiDirection === "right") { dCol += player.speed; newDir = "right"; isMoving = true; }
+        if (player.aiDirection === "up") { dRow -= player.speed; newDir = "up"; isMoving = true }
+        if (player.aiDirection === "down") { dRow += player.speed; newDir = "down"; isMoving = true }
+        if (player.aiDirection === "left") { dCol -= player.speed; newDir = "left"; isMoving = true }
+        if (player.aiDirection === "right") { dCol += player.speed; newDir = "right"; isMoving = true }
     }
 
     let nextPos = player.position
@@ -197,16 +231,11 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
 }
 
 const updateGridTimers = (grid: Cell[][]): Cell[][] => {
-    return EffectArray.map(grid, row => EffectArray.map(row, cell => {
-        if (cell.isDestroying) {
-            if (cell.destroyTimer > 0) {
-                return Cell.make({ ...cell, destroyTimer: cell.destroyTimer - 1 })
-            } else {
-                return Cell.make({ ...cell, type: "empty", isDestroying: false })
-            }
-        }
-        return cell
-    }))
+    return EffectArray.map(grid, row => EffectArray.map(row, cell =>
+        cell.isDestroying ?
+            (cell.destroyTimer > 0 ? Cell.make({ ...cell, destroyTimer: cell.destroyTimer - 1 }) : Cell.make({ ...cell, type: "empty", isDestroying: false }))
+            : cell
+    ))
 }
 
 const canPlantBomb = (p: Player, bombs: Bomb[]) => p.isAlive && p.activeBombs < p.maxBombs
@@ -261,7 +290,6 @@ const doesOverlap = (pos: Position, cellR: number, cellC: number): boolean => {
 }
 
 const checkPowerupCollection = (model: Model): Model => {
-    // Pure transformation
     const collectedUpdates = EffectArray.reduce(model.players, { grid: model.grid, players: [] as Player[] }, (acc, p) => {
         if (!p.isAlive) return { ...acc, players: EffectArray.append(acc.players, p) }
 
@@ -275,7 +303,6 @@ const checkPowerupCollection = (model: Model): Model => {
             if (cell.powerup === "BombUp") updatedPlayer.maxBombs++
             if (cell.powerup === "SpeedUp") updatedPlayer.speed += SPEED_INCREMENT
 
-            // Return updated grid (powerup removed) and updated player
             const newRow = EffectArray.map(acc.grid[r], (cCell, idx) => idx === c ? Cell.make({ ...cCell, powerup: null }) : cCell)
             const newGrid = EffectArray.map(acc.grid, (row, idx) => idx === r ? newRow : row)
 
@@ -291,15 +318,10 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
     // 1. Filter out old explosions
     let newExplosions = EffectArray.filter(model.explosions, e => (model.currentTime - e.createdAt) < FPS * EXPLOSION_DURATION)
 
-    // 2. Identify new explosions (from bombs)
+    // 2. Identify new explosions
     const explodingBombIndices = EffectArray.filterMap(model.bombs, (b, i) => {
-        // Time based or Chain reaction?
-        // Chain reaction is hard to calculate immutably in one pass without recursion.
-        // Simplified: Explode if time is up OR if on an existing explosion.
         const r = Math.round(b.position.row)
         const c = Math.round(b.position.col)
-
-        // Check if bomb is on a cell that currently has an explosion
         const hitByExplosion = model.grid[r][c].hasExplosion
 
         if ((model.currentTime - b.plantedAt) >= FPS * BOMB_TIMER || hitByExplosion) {
@@ -308,10 +330,7 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
         return Option.none()
     })
 
-    // If no bombs explode, just return cleaned explosions
     if (explodingBombIndices.length === 0) {
-        // Need to update grid hasExplosion state based on remaining explosions
-        // This requires a full grid map
         const activeExplosionCells = new Set(EffectArray.flatMap(newExplosions, e => e.cells).map(p => `${p.row},${p.col}`))
         const newGrid = EffectArray.map(model.grid, (row, r) => EffectArray.map(row, (cell, c) =>
             Cell.make({ ...cell, hasExplosion: activeExplosionCells.has(`${r},${c}`) })
@@ -319,12 +338,6 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
         return { grid: newGrid, explosions: newExplosions, bombs: model.bombs, players: model.players }
     }
 
-    // Process explosions
-    // We simply remove the bombs and add new explosions.
-    // We let the NEXT tick handle the "destroy soft block" logic via the grid state to keep this function cleaner,
-    // OR we calculate the rays here.
-
-    // Let's calculate rays for the exploding bombs
     const newRayExplosions = EffectArray.flatMap(model.bombs, (b, i) => {
         if (!EffectArray.contains(explodingBombIndices, i)) return []
 
@@ -333,9 +346,6 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
         cells.push(Position.make({ row: center.r, col: center.c }))
 
         const dirs = [[0,1], [0,-1], [1,0], [-1,0]]
-        // Ray casting logic (simplified for immutable array construction)
-        // In a strictly immutable/pure functional way, we can't "break" easily inside a map.
-        // We usually calculate the full ray distance then generate points.
 
         dirs.forEach(([dr, dc]) => {
             for (let k = 1; k <= b.range; k++) {
@@ -345,21 +355,17 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
                 const cell = model.grid[r][c]
                 if (cell.type === "hard") break
                 cells.push(Position.make({ row: r, col: c }))
-                if (cell.type === "soft" && !cell.isDestroying) break // Stop at soft block
+                if (cell.type === "soft" && !cell.isDestroying) break
             }
         })
-
         return [Explosion.make({ cells, createdAt: model.currentTime })]
     })
 
     const allExplosions = EffectArray.appendAll(newExplosions, newRayExplosions)
     const activeExplosionCells = new Set(EffectArray.flatMap(allExplosions, e => e.cells).map(p => `${p.row},${p.col}`))
 
-    // Rebuild Grid
     const newGrid = EffectArray.map(model.grid, (row, r) => EffectArray.map(row, (cell, c) => {
         const isExplosion = activeExplosionCells.has(`${r},${c}`)
-
-        // Handle Block Destruction
         if (isExplosion && cell.type === "soft" && !cell.isDestroying) {
              const spawnPowerup = Math.random() * 100 < settings.powerupSpawnChance
              let powerup: any = null
@@ -374,19 +380,13 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
                  destroyTimer: FPS * DESTRUCTION_DELAY, powerup
              })
         }
-
-        // Handle Powerup Destruction
         if (isExplosion && cell.powerup) {
             return Cell.make({ ...cell, hasExplosion: true, powerup: null })
         }
-
         return Cell.make({ ...cell, hasExplosion: isExplosion })
     }))
 
-    // Remove exploded bombs
     const remainingBombs = EffectArray.filter(model.bombs, (_, i) => !EffectArray.contains(explodingBombIndices, i))
-
-    // Restore bombs to players
     const playersRestored = EffectArray.map(model.players, p => {
         const bombsOwnedExploded = EffectArray.filter(model.bombs, (b, i) =>
             b.playerId === p.id && EffectArray.contains(explodingBombIndices, i)
@@ -403,9 +403,22 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
 const checkDeaths = (model: Model): Model => {
     const players = EffectArray.map(model.players, p => {
         if (!p.isAlive) return p
-        const r = Math.round(p.position.row)
-        const c = Math.round(p.position.col)
-        if (model.grid[r][c].hasExplosion) {
+
+        // CORNER CHECK LOGIC FOR DEATH
+        // Check 4 corners with a slight inset (hitbox)
+        const corners = [
+            { r: Math.floor(p.position.row + 0.2), c: Math.floor(p.position.col + 0.2) },
+            { r: Math.floor(p.position.row + 0.2), c: Math.floor(p.position.col + 0.8) },
+            { r: Math.floor(p.position.row + 0.8), c: Math.floor(p.position.col + 0.2) },
+            { r: Math.floor(p.position.row + 0.8), c: Math.floor(p.position.col + 0.8) }
+        ]
+
+        const isHit = corners.some(corner => {
+             if (corner.r < 0 || corner.r >= GRID_ROWS || corner.c < 0 || corner.c >= GRID_COLS) return false
+             return model.grid[corner.r][corner.c].hasExplosion
+        })
+
+        if (isHit) {
             return Player.make({ ...p, isAlive: false })
         }
         return p

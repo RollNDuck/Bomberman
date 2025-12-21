@@ -3,7 +3,6 @@
     "powerupSpawnChance": 30,
     "timerSeconds": 180,
     "humanPlayers": 1,
-    "botPlayers": 2,
-    "botBombChance": 50,
-    "botMoveChance": 80
+    "botTypes": ["hostile", "careful", "greedy"],
+    "roundsToWin": 3
 }
