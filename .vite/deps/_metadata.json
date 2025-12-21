@@ -1,0 +1,25 @@
+{
+  "hash": "150735a4",
+  "configHash": "27a7add1",
+  "lockfileHash": "e3b0c442",
+  "browserHash": "b211db90",
+  "optimized": {
+    "cs12251-mvu/src": {
+      "src": "../../implementation2/node_modules/cs12251-mvu/src/index.ts",
+      "file": "cs12251-mvu_src.js",
+      "fileHash": "6cf043fc",
+      "needsInterop": false
+    },
+    "effect": {
+      "src": "../../implementation2/node_modules/effect/dist/esm/index.js",
+      "file": "effect.js",
+      "fileHash": "a1c37d29",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-L3HZZPAK": {
+      "file": "chunk-L3HZZPAK.js"
+    }
+  }
+}

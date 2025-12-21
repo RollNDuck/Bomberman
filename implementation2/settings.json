@@ -1,0 +1,7 @@
+{
+  "softBlockSpawnProbability": 30,
+  "powerupSpawnProbability": 50,
+  "timerSeconds": 60,
+  "humanPlayers": 1,
+  "botTypes": []
+}
