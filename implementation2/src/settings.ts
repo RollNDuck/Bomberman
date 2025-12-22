@@ -1,0 +1,8 @@
+export default {
+    softBlockSpawnChance: 40,
+    powerupSpawnChance: 30,
+    timerSeconds: 180,
+    humanPlayers: 1,
+    botTypes: ["hostile", "careful", "greedy"],
+    roundsToWin: 3
+}

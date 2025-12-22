@@ -1,5 +1,5 @@
 import { Array as EffectArray } from "effect"
-import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, GAME_DURATION, FPS } from "./model"
+import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS } from "./model"
 import { Msg } from "./msg"
 import { h } from "cs12251-mvu/src"
 
@@ -19,7 +19,6 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
             padding: "20px"
         }
     }, [
-        // --- SCOREBOARD ---
         h("div", {
             style: {
                 display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -29,7 +28,6 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
                 padding: "5px 15px", marginBottom: "0px", boxSizing: "border-box", height: "50px"
             }
         }, [
-            // Left: Round & Time
             h("div", { style: { display: "flex", alignItems: "center", fontWeight: "bold", color: "#FFF" } }, [
                  h("div", { style: { marginRight: "10px" } }, `R${model.roundNumber}`),
                  h("div", {
@@ -40,7 +38,6 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
                      }
                  }, timeStr)
             ]),
-            // Right: Players
             h("div", { style: { display: "flex", gap: "10px" } },
                 EffectArray.map(model.players, p =>
                     h("div", { style: { display: "flex", alignItems: "center", opacity: p.isAlive ? 1 : 0.5 } }, [
@@ -58,7 +55,6 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
             )
         ]),
 
-        // --- GAME AREA ---
         h("div", {
             style: {
                 position: "relative",
@@ -72,14 +68,13 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
             renderBombs(model),
             renderExplosions(model),
             renderPlayers(model),
-            renderOverlays(model), // New: Phase 5 Overlays
+            renderOverlays(model),
             model.gamePhase === "gameOver" ? renderGameOver(model) : null
         ].flat().filter(Boolean))
     ])
 }
 
 const renderOverlays = (model: Model) => {
-    // Warmup Countdown
     if (model.state === "warmup") {
         const count = Math.ceil(model.roundTimer / FPS)
         return h("div", {
@@ -92,7 +87,6 @@ const renderOverlays = (model: Model) => {
         }, count.toString())
     }
 
-    // Round Over / Match Over Screen
     if (model.state === "roundOver" || model.state === "matchOver") {
         const title = model.state === "matchOver" ? "MATCH OVER" : "ROUND OVER"
         const sub = model.roundWinner === "Draw" ? "Draw!" : `${model.roundWinner} Wins!`
