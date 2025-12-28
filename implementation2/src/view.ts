@@ -154,6 +154,8 @@ const renderGrid = (model: Model) => {
                 if (cell.powerup === "FireUp") { color = "#FF4500"; text = "🔥"; }
                 if (cell.powerup === "BombUp") { color = "#000"; text = "💣"; }
                 if (cell.powerup === "SpeedUp") { color = "#1E90FF"; text = "👞"; }
+                if (cell.powerup === "Rainbow") { color = "#FF00FF"; text = "🌈"; }
+                if (cell.powerup === "Vest") { color = "#FFFF00"; text = "🛡️"; }
                 elements.push(h("div", {
                     style: {
                         position: "absolute", left: `${c * CELL_SIZE + 5}px`, top: `${r * CELL_SIZE + 5}px`,
@@ -223,6 +225,89 @@ const renderPlayers = (model: Model) => {
         const leftFootTop = animFrame === 0 ? "32px" : "30px"
         const rightFootTop = animFrame === 0 ? "30px" : "32px"
 
+        // ========== PHASE 4: DEBUG VISUALIZATION ==========
+        const debugElements: any[] = []
+        if (model.isDebugMode && !p.isHuman) {
+            // Draw danger radius circle
+            if (p.dangerCheckDistance > 0) {
+                const radius = p.dangerCheckDistance * CELL_SIZE
+                debugElements.push(h("div", {
+                    style: {
+                        position: "absolute",
+                        left: `${p.position.col * CELL_SIZE - radius/2 + CELL_SIZE/2}px`,
+                        top: `${p.position.row * CELL_SIZE - radius/2 + CELL_SIZE/2}px`,
+                        width: `${radius}px`,
+                        height: `${radius}px`,
+                        border: "2px dashed rgba(255, 0, 0, 0.5)",
+                        borderRadius: "50%",
+                        zIndex: "18"
+                    }
+                }))
+            }
+
+            // Draw bot state text
+            debugElements.push(h("div", {
+                style: {
+                    position: "absolute",
+                    left: `${p.position.col * CELL_SIZE}px`,
+                    top: `${p.position.row * CELL_SIZE - 20}px`,
+                    backgroundColor: "rgba(0, 0, 0, 0.7)",
+                    color: "#fff",
+                    fontSize: "10px",
+                    padding: "2px",
+                    zIndex: "19",
+                    whiteSpace: "nowrap"
+                }
+            }, `${p.botType || "human"}: ${p.botState || "none"}`))
+
+            // Draw path if exists
+            if (p.botPath && p.botPath.length > 0) {
+                for (let i = 0; i < p.botPath.length; i++) {
+                    const pos = p.botPath[i]
+                    let cornerStyle = {}
+                    // Different corners for different players
+                    if (p.id === 2) {
+                        cornerStyle = { top: "0px", right: "0px" } // Top-right for P2
+                    } else if (p.id === 3) {
+                        cornerStyle = { bottom: "0px", left: "0px" } // Bottom-left for P3
+                    } else if (p.id === 4) {
+                        cornerStyle = { bottom: "0px", right: "0px" } // Bottom-right for P4
+                    }
+
+                    debugElements.push(h("div", {
+                        style: {
+                            position: "absolute",
+                            left: `${pos.col * CELL_SIZE}px`,
+                            top: `${pos.row * CELL_SIZE}px`,
+                            width: "6px",
+                            height: "6px",
+                            backgroundColor: p.color,
+                            ...cornerStyle,
+                            zIndex: "19"
+                        }
+                    }))
+                }
+            }
+
+            // Draw goal indicator if exists
+            if (p.botGoal && p.botGoal.row !== -1) {
+                debugElements.push(h("div", {
+                    style: {
+                        position: "absolute",
+                        left: `${p.botGoal.col * CELL_SIZE + CELL_SIZE/2 - 4}px`,
+                        top: `${p.botGoal.row * CELL_SIZE + CELL_SIZE/2 - 4}px`,
+                        width: "8px",
+                        height: "8px",
+                        backgroundColor: p.color,
+                        border: "2px solid #000",
+                        borderRadius: "50%",
+                        zIndex: "19"
+                    }
+                }))
+            }
+        }
+        // ========== END DEBUG VISUALIZATION ==========
+
         return h("div", {
             style: {
                 position: "absolute", left: `${p.position.col * CELL_SIZE}px`, top: `${p.position.row * CELL_SIZE}px`,
@@ -247,6 +332,9 @@ const renderPlayers = (model: Model) => {
             h("div", { style: { width: "7px", height: "7px", backgroundColor: accessoryColor, borderRadius: "50%", border: "1px solid #000", position: "absolute", top: rightHandTop, right: isSide ? "14px" : "4px", zIndex: "26", display: (isSide && !isRight) ? "none" : "block" } }),
             h("div", { style: { width: "8px", height: "6px", backgroundColor: accessoryColor, borderRadius: "3px", border: "1px solid #000", position: "absolute", top: leftFootTop, left: "8px", zIndex: "23", transition: "top 0.1s" } }),
             h("div", { style: { width: "8px", height: "6px", backgroundColor: accessoryColor, borderRadius: "3px", border: "1px solid #000", position: "absolute", top: rightFootTop, right: "8px", zIndex: "23", transition: "top 0.1s" } }),
+
+            // ========== ADD DEBUG ELEMENTS ==========
+            ...debugElements
         ])
     })
 }

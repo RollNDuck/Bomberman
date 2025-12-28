@@ -9,7 +9,6 @@ export const Msg = S.Union(
         key: S.String,
     }),
     S.TaggedStruct("Tick", {}),
-    S.TaggedStruct("ToggleDebug", {}),
     S.TaggedStruct("RestartGame", {}),
     S.TaggedStruct("StartNextRound", {}),
 )

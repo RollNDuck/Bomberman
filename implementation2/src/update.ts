@@ -1,83 +1,44 @@
-import { Match, Array as EffectArray } from "effect"
+import { Match, Array as EffectArray, Option, pipe } from "effect"
 import { Msg } from "./msg"
 import {
     Model, Player, Bomb, Explosion, Position, Cell, GRID_ROWS, GRID_COLS,
     FPS, BOMB_TIMER, EXPLOSION_DURATION, BASE_SPEED, SPEED_INCREMENT,
     DESTRUCTION_DELAY, WARMUP_SECONDS, createGrid, initModel
 } from "./model"
-import settings from "./settings"
 
-const P1_KEYS = {
-    up: "ArrowUp",
-    down: "ArrowDown",
-    left: "ArrowLeft",
-    right: "ArrowRight",
-    bomb: " "
-}
-const P2_KEYS = {
-    up: "w",
-    down: "s",
-    left: "a",
-    right: "d",
-    bomb: "x"
+// ==================== SETTINGS & CONSTANTS ====================
+const settings = {
+    softBlockSpawnChance: 40,
+    powerupSpawnChance: 30,
+    timerSeconds: 180,
+    humanPlayers: 1,
+    botTypes: ["hostile", "careful", "greedy", "extreme"],
+    roundsToWin: 3
 }
 
-const isBombAt = (pos: Position, bombs: Bomb[]): boolean => {
-    const roundedPos = {
-        row: Math.round(pos.row),
-        col: Math.round(pos.col)
-    }
-    return EffectArray.some(bombs, b =>
-        Math.round(b.position.row) === roundedPos.row &&
-        Math.round(b.position.col) === roundedPos.col
-    )
-}
+const P1_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", bomb: " " }
+const P2_KEYS = { up: "w", down: "s", left: "a", right: "d", bomb: "x" }
 
-const canPlantBomb = (player: Player, bombs: Bomb[]): boolean => {
-    return player.isAlive && player.activeBombs < player.maxBombs
-}
-
-const createBomb = (player: Player, time: number): Bomb => {
-    return Bomb.make({
-        position: Position.make({
-            row: Math.round(player.position.row),
-            col: Math.round(player.position.col)
-        }),
-        plantedAt: time,
-        range: player.bombRange,
-        playerId: player.id
-    })
-}
-
+// ==================== MAIN UPDATE FUNCTION ====================
 export const update = (msg: Msg, model: Model): Model => {
     return Match.value(msg).pipe(
         Match.tag("KeyDown", ({ key }) => handleKeyDown(key, model)),
         Match.tag("KeyUp", ({ key }) => handleKeyUp(key, model)),
         Match.tag("Tick", () => handleTick(model)),
-        Match.tag("ToggleDebug", () => Model.make({ ...model, isDebugMode: !model.isDebugMode })),
         Match.tag("RestartGame", () => handleRestartGame()),
         Match.tag("StartNextRound", () => handleStartNextRound(model)),
-        Match.exhaustive,
+        Match.exhaustive
     )
 }
 
+// ==================== KEY HANDLERS ====================
 const handleKeyDown = (key: string, model: Model): Model => {
-    if (key.toLowerCase() === "r" && (model.state === "roundOver" || model.state === "matchOver")) {
-        if (model.state === "matchOver") {
-            return handleRestartGame()
-        } else {
-            return handleStartNextRound(model)
-        }
+    if (key === "Escape") {
+        return { ...model, isDebugMode: !model.isDebugMode }
     }
 
-    if (key === "Escape") {
-        if (model.state === "playing") {
-            return Model.make({ ...model, isDebugMode: !model.isDebugMode })
-        } else if (model.state === "roundOver") {
-            return handleStartNextRound(model)
-        } else if (model.state === "matchOver") {
-            return handleRestartGame()
-        }
+    if ((key === "r" || key === "R") && (model.state === "roundOver" || model.state === "matchOver")) {
+        return model.state === "matchOver" ? handleRestartGame() : handleStartNextRound(model)
     }
 
     if (model.state !== "playing") return model
@@ -85,204 +46,83 @@ const handleKeyDown = (key: string, model: Model): Model => {
     const newKeys = new Set(model.keys)
     newKeys.add(key)
 
-    const bombUpdates = EffectArray.reduce(model.players, {
-        players: [],
-        bombs: model.bombs
-    }, (acc, player) => {
-        if (!player.isHuman || !player.isAlive) {
-            return {
-                ...acc,
-                players: EffectArray.append(acc.players, player)
-            }
-        }
+    // Handle bomb planting for human players
+    let newBombs = [...model.bombs]
+    const newPlayers = model.players.map(player => {
+        if (!player.isHuman || !player.isAlive) return player
 
-        let bombKey = ""
-        if (player.id === 1) bombKey = P1_KEYS.bomb
-        else if (player.id === 2) bombKey = P2_KEYS.bomb
-
-        if (key === bombKey && canPlantBomb(player, acc.bombs)) {
+        const bombKey = player.id === 1 ? P1_KEYS.bomb : P2_KEYS.bomb
+        if (key === bombKey && player.activeBombs < player.maxBombs) {
             const bombPos = Position.make({
                 row: Math.round(player.position.row),
                 col: Math.round(player.position.col)
             })
 
-            if (!isBombAt(bombPos, acc.bombs)) {
-                const bomb = createBomb(player, model.currentTime)
+            // Check if there's already a bomb at this position
+            const bombAlreadyExists = newBombs.some(bomb =>
+                Math.round(bomb.position.row) === bombPos.row &&
+                Math.round(bomb.position.col) === bombPos.col
+            )
 
-                return {
-                    players: EffectArray.append(acc.players, Player.make({
-                        ...player,
-                        activeBombs: player.activeBombs + 1
-                    })),
-                    bombs: EffectArray.append(acc.bombs, bomb)
-                }
+            if (!bombAlreadyExists) {
+                newBombs.push(Bomb.make({
+                    position: bombPos,
+                    plantedAt: model.currentTime,
+                    range: player.bombRange,
+                    playerId: player.id
+                }))
+
+                return { ...player, activeBombs: player.activeBombs + 1 }
             }
         }
-
-        return {
-            ...acc,
-            players: EffectArray.append(acc.players, player)
-        }
+        return player
     })
 
-    return Model.make({
-        ...model,
-        keys: newKeys,
-        players: bombUpdates.players,
-        bombs: bombUpdates.bombs
-    })
+    return { ...model, keys: newKeys, players: newPlayers, bombs: newBombs }
 }
 
 const handleKeyUp = (key: string, model: Model): Model => {
     const newKeys = new Set(model.keys)
     newKeys.delete(key)
-    return Model.make({ ...model, keys: newKeys })
+    return { ...model, keys: newKeys }
 }
 
+// ==================== TICK HANDLER ====================
 const handleTick = (model: Model): Model => {
-    const currentTime = model.currentTime + 1
-
+    // Handle warmup countdown
     if (model.state === "warmup") {
-        const remaining = model.roundTimer - 1
-        if (remaining <= 0) {
-            return Model.make({
+        if (model.roundTimer <= 1) {
+            return {
                 ...model,
-                currentTime,
                 state: "playing",
-                roundTimer: settings.timerSeconds * FPS
-            })
+                roundTimer: settings.timerSeconds * FPS,
+                currentTime: model.currentTime + 1
+            }
         }
-        return Model.make({
+        return {
             ...model,
-            currentTime,
-            roundTimer: remaining
-        })
+            roundTimer: model.roundTimer - 1,
+            currentTime: model.currentTime + 1
+        }
     }
 
-    if (model.state === "roundOver" || model.state === "matchOver") {
-        return Model.make({ ...model, currentTime })
+    // Don't update game logic if round/match is over
+    if (model.state !== "playing") {
+        return { ...model, currentTime: model.currentTime + 1 }
     }
 
+    // Check for timeout
     if (model.roundTimer <= 0) {
         return endRound(model, "Draw")
     }
 
-    let updatedModel = Model.make({
-        ...model,
-        currentTime,
-        roundTimer: model.roundTimer - 1
-    })
+    const nextTime = model.currentTime + 1
 
-    updatedModel.grid = updateGridTimers(updatedModel.grid)
-    updatedModel.players = EffectArray.map(updatedModel.players, updatePlayerTimers)
-
-    if (updatedModel.players.length > 1) {
-        updatedModel = updateBotAI(updatedModel)
-    }
-
-    updatedModel.players = EffectArray.map(updatedModel.players, player =>
-        updatePlayerMovement(player, updatedModel.keys, updatedModel)
-    )
-
-    updatedModel = checkPowerupCollection(updatedModel)
-
-    const bombResult = updateBombsAndExplosions(updatedModel)
-    updatedModel = { ...updatedModel, ...bombResult }
-
-    updatedModel = checkDeaths(updatedModel)
-
-    return updatedModel
-}
-
-const handleRestartGame = (): Model => {
-    const newModel = createGrid()
-    return Model.make({
-        ...initModel,
-        grid: newModel,
-        roundsToWin: settings.roundsToWin || 3
-    })
-}
-
-const handleStartNextRound = (model: Model): Model => {
-    const newPlayers = EffectArray.map(model.players, player => Player.make({
-        ...player,
-        position: player.startPosition,
-        isAlive: true,
-        activeBombs: 0,
-        speed: BASE_SPEED,
-        bombRange: 1,
-        maxBombs: 1,
-        hasVest: false,
-        vestTimer: 0,
-        rainbowTimers: { FireUp: 0, BombUp: 0, SpeedUp: 0 },
-        direction: "down",
-        isMoving: false,
-        botState: player.botType ? "WANDER" : null,
-        botGoal: Position.make({ row: -1, col: -1 }),
-        botPath: [],
-        lastReevaluation: 0,
-        aiDirection: null
-    }))
-
-    return Model.make({
-        grid: createGrid(),
-        players: newPlayers,
-        bombs: [],
-        explosions: [],
-        keys: new Set(),
-        currentTime: 0,
-        state: "warmup",
-        roundTimer: WARMUP_SECONDS * FPS,
-        roundNumber: model.roundNumber + 1,
-        roundWinner: null,
-        roundsToWin: model.roundsToWin,
-        isDebugMode: false,
-        deathTimer: null,
-        gamePhase: "active",
-        gameOverMessage: ""
-    })
-}
-
-const endRound = (model: Model, winnerLabel: string): Model => {
-    const newPlayers = EffectArray.map(model.players, player =>
-        player.label === winnerLabel ?
-            Player.make({ ...player, wins: player.wins + 1 }) :
-            player
-    )
-
-    const matchWinner = EffectArray.findFirst(newPlayers, player =>
-        player.wins >= model.roundsToWin
-    )
-
-    return Match.value(matchWinner).pipe(
-        Match.tag("Some", ({ value: winner }) =>
-            Model.make({
-                ...model,
-                players: newPlayers,
-                state: "matchOver",
-                roundWinner: winner.label,
-                gamePhase: "active"
-            })
-        ),
-        Match.tag("None", () =>
-            Model.make({
-                ...model,
-                players: newPlayers,
-                state: "roundOver",
-                roundWinner: winnerLabel,
-                gamePhase: "active"
-            })
-        ),
-        Match.exhaustive
-    )
-}
-
-const updateGridTimers = (grid: Cell[][]): Cell[][] => {
-    return EffectArray.map(grid, row =>
+    // Update grid timers
+    const nextGrid = EffectArray.map(model.grid, row =>
         EffectArray.map(row, cell => {
-            if (cell.isDestroying) {
-                const newTimer = cell.destroyTimer - 1
-                if (newTimer <= 0) {
+            if (cell.isDestroying && cell.destroyTimer > 0) {
+                if (cell.destroyTimer === 1) {
                     return Cell.make({
                         ...cell,
                         type: "empty",
@@ -290,90 +130,578 @@ const updateGridTimers = (grid: Cell[][]): Cell[][] => {
                         destroyTimer: 0
                     })
                 }
-                return Cell.make({ ...cell, destroyTimer: newTimer })
+                return Cell.make({ ...cell, destroyTimer: cell.destroyTimer - 1 })
             }
             return cell
         })
     )
-}
 
-const updatePlayerTimers = (player: Player): Player => {
-    let updatedPlayer = { ...player }
+    // Update player timers
+    const playersWithTimers = model.players.map(player => updatePlayerTimers(player))
 
-    if (updatedPlayer.hasVest) {
-        updatedPlayer.vestTimer = Math.max(0, updatedPlayer.vestTimer - 1 / FPS)
-        if (updatedPlayer.vestTimer <= 0) {
-            updatedPlayer.hasVest = false
-        }
-    }
-
-    const timers = { ...updatedPlayer.rainbowTimers }
-    let hasActiveRainbow = false
-
-    if (timers.FireUp > 0) {
-        timers.FireUp = Math.max(0, timers.FireUp - 1 / FPS)
-        hasActiveRainbow = true
-    }
-    if (timers.BombUp > 0) {
-        timers.BombUp = Math.max(0, timers.BombUp - 1 / FPS)
-        hasActiveRainbow = true
-    }
-    if (timers.SpeedUp > 0) {
-        timers.SpeedUp = Math.max(0, timers.SpeedUp - 1 / FPS)
-        hasActiveRainbow = true
-    }
-
-    if (!hasActiveRainbow) {
-        updatedPlayer.bombRange = Math.max(1, updatedPlayer.bombRange - 3)
-        updatedPlayer.maxBombs = Math.max(1, updatedPlayer.maxBombs - 3)
-        updatedPlayer.speed = Math.max(BASE_SPEED, updatedPlayer.speed - SPEED_INCREMENT * 3)
-    }
-
-    return Player.make({ ...updatedPlayer, rainbowTimers: timers })
-}
-
-const updateBotAI = (model: Model): Model => {
-    return EffectArray.reduce(model.players, {
+    // Create intermediate model for bot AI
+    const intermediateModel = {
         ...model,
-        players: [],
-        bombs: model.bombs
-    }, (acc, player) => {
-        if (!player.isAlive || player.isHuman) {
-            return {
-                ...acc,
-                players: EffectArray.append(acc.players, player)
-            }
+        grid: nextGrid,
+        players: playersWithTimers,
+        currentTime: nextTime
+    }
+
+    // Update bot AI
+    const { players: playersWithAI, bombs: bombsAfterAI } = updateBotAI(intermediateModel)
+
+    // Update player movement
+    const movedPlayers = playersWithAI.map(player =>
+        updatePlayerMovement(player, model.keys, { ...intermediateModel, players: playersWithAI })
+    )
+
+    // Check for powerup collection
+    const afterPowerups = checkPowerupCollection({
+        ...intermediateModel,
+        players: movedPlayers,
+        bombs: bombsAfterAI
+    })
+
+    // Update bombs and explosions
+    const afterExplosions = updateBombsAndExplosions(afterPowerups)
+
+    // Check for deaths
+    const finalModel = checkDeaths(afterExplosions)
+
+    return {
+        ...finalModel,
+        roundTimer: model.roundTimer - 1
+    }
+}
+
+// ==================== BOT AI FUNCTIONS ====================
+type PathNode = {
+    position: Position
+    distance: number
+    previous: Option.Option<Position>
+    visited: boolean
+}
+
+const findShortestPath = (
+    start: Position,
+    goal: Position,
+    grid: Cell[][],
+    ignoreSoftBlocks: boolean = false
+): Position[] => {
+    if (goal.row < 0 || goal.row >= GRID_ROWS || goal.col < 0 || goal.col >= GRID_COLS) {
+        return []
+    }
+
+    const nodes: PathNode[][] = EffectArray.makeBy(GRID_ROWS, (r) =>
+        EffectArray.makeBy(GRID_COLS, (c) => ({
+            position: Position.make({ row: r, col: c }),
+            distance: Infinity,
+            previous: Option.none(),
+            visited: false
+        }))
+    )
+
+    const isWalkable = (r: number, c: number): boolean => {
+        if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false
+        const cell = grid[r][c]
+        if (cell.type === "hard") return false
+        if (!ignoreSoftBlocks && cell.type === "soft" && !cell.isDestroying) return false
+        return true
+    }
+
+    const sR = Math.round(start.row), sC = Math.round(start.col)
+    const gR = Math.round(goal.row), gC = Math.round(goal.col)
+
+    if (!isWalkable(sR, sC) || !isWalkable(gR, gC)) return []
+
+    nodes[sR][sC].distance = 0
+    let unvisited: PathNode[] = [nodes[sR][sC]]
+
+    while (unvisited.length > 0) {
+        unvisited.sort((a, b) => a.distance - b.distance)
+        const current = unvisited.shift()!
+
+        if (current.visited) continue
+        current.visited = true
+
+        if (current.position.row === gR && current.position.col === gC) {
+            return reconstructPath(current, nodes)
         }
 
-        let updatedPlayer = { ...player }
-        let currentBombs = acc.bombs
+        const neighbors = [
+            { r: -1, c: 0 }, { r: 1, c: 0 }, { r: 0, c: -1 }, { r: 0, c: 1 }
+        ]
 
-        if (model.currentTime % (FPS / 2) === 0) {
-            const directions = ["up", "down", "left", "right"] as const
-            const validDirs = directions.filter(dir =>
-                isSafeMove(updatedPlayer.position, dir, model)
-            )
-            if (validDirs.length > 0) {
-                updatedPlayer.aiDirection = validDirs[Math.floor(Math.random() * validDirs.length)]
-            }
+        for (const offset of neighbors) {
+            const nR = current.position.row + offset.r
+            const nC = current.position.col + offset.c
 
-            if (Math.random() < 0.1 && canPlantBomb(updatedPlayer, currentBombs)) {
-                const bomb = createBomb(updatedPlayer, model.currentTime)
-                if (!isBombAt(bomb.position, currentBombs)) {
-                    currentBombs = EffectArray.append(currentBombs, bomb)
-                    updatedPlayer.activeBombs = updatedPlayer.activeBombs + 1
+            if (isWalkable(nR, nC)) {
+                const neighborNode = nodes[nR][nC]
+                const newDist = current.distance + 1
+                if (newDist < neighborNode.distance) {
+                    neighborNode.distance = newDist
+                    neighborNode.previous = Option.some(current.position)
+                    if (!neighborNode.visited) {
+                        unvisited.push(neighborNode)
+                    }
                 }
             }
         }
-
-        return {
-            ...acc,
-            players: EffectArray.append(acc.players, Player.make(updatedPlayer)),
-            bombs: currentBombs
-        }
-    })
+    }
+    return []
 }
 
+const reconstructPath = (goalNode: PathNode, nodes: PathNode[][]): Position[] => {
+    const path: Position[] = []
+    let current = Option.some(goalNode)
+
+    while (Option.isSome(current)) {
+        const node = current.value
+        path.unshift(node.position)
+
+        if (Option.isSome(node.previous)) {
+            const prev = node.previous.value
+            current = Option.some(nodes[prev.row][prev.col])
+            if (nodes[prev.row][prev.col].distance === 0) {
+                current = Option.none()
+            }
+        } else {
+            current = Option.none()
+        }
+    }
+    return path
+}
+
+const manhattanDistance = (p1: Position, p2: Position): number => {
+    return Math.abs(Math.round(p1.row) - Math.round(p2.row)) +
+           Math.abs(Math.round(p1.col) - Math.round(p2.col))
+}
+
+const isReachable = (start: Position, goal: Position, grid: Cell[][]): boolean => {
+    return findShortestPath(start, goal, grid, true).length > 0
+}
+
+const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
+    let newBombs = [...model.bombs]
+    const newPlayers = model.players.map(player => {
+        if (!player.isAlive || player.isHuman || !player.botType) return player
+
+        // Check if reevaluation is needed
+        const timeSinceReeval = (model.currentTime - player.lastReevaluation) / FPS
+        const shouldReeval = timeSinceReeval >= player.reevaluationInterval &&
+                           Math.random() < player.reevaluationChance
+
+        let updatedPlayer = player
+        if (shouldReeval || !player.botState) {
+            updatedPlayer = performReevaluation(player, model)
+            updatedPlayer = { ...updatedPlayer, lastReevaluation: model.currentTime }
+        }
+
+        // Execute bot state
+        updatedPlayer = executeBotState(updatedPlayer, model)
+
+        // Handle bomb planting
+        if (shouldPlantBomb(updatedPlayer, model) && updatedPlayer.activeBombs < updatedPlayer.maxBombs) {
+            const bombPos = Position.make({
+                row: Math.round(updatedPlayer.position.row),
+                col: Math.round(updatedPlayer.position.col)
+            })
+
+            const bombAlreadyExists = newBombs.some(bomb =>
+                Math.round(bomb.position.row) === bombPos.row &&
+                Math.round(bomb.position.col) === bombPos.col
+            )
+
+            if (!bombAlreadyExists) {
+                newBombs.push(Bomb.make({
+                    position: bombPos,
+                    plantedAt: model.currentTime,
+                    range: updatedPlayer.bombRange,
+                    playerId: updatedPlayer.id
+                }))
+                updatedPlayer = { ...updatedPlayer, activeBombs: updatedPlayer.activeBombs + 1 }
+            }
+        }
+
+        return updatedPlayer
+    })
+
+    return { players: newPlayers, bombs: newBombs }
+}
+
+const performReevaluation = (player: Player, model: Model): Player => {
+    // 1. Check for danger
+    if (isInDanger(player, model)) {
+        const safeGoal = findSafeGoal(player, model)
+        const path = safeGoal.row !== -1 ? findShortestPath(player.position, safeGoal, model.grid, true) : []
+        return {
+            ...player,
+            botState: "ESCAPE",
+            botGoal: safeGoal,
+            botPath: path,
+            aiDirection: getDirectionToNextCell(player, path)
+        }
+    }
+
+    // 2. Check for powerups
+    const powerupGoal = findPowerupGoal(player, model)
+    if (Option.isSome(powerupGoal)) {
+        const path = findShortestPath(player.position, powerupGoal.value, model.grid)
+        return {
+            ...player,
+            botState: "GET_POWERUP",
+            botGoal: powerupGoal.value,
+            botPath: path,
+            aiDirection: getDirectionToNextCell(player, path)
+        }
+    }
+
+    // 3. Check for attack opportunities
+    const attackGoal = findAttackGoal(player, model)
+    if (Option.isSome(attackGoal)) {
+        const ignoreSoft = player.attackPolicy === "first"
+        const path = findShortestPath(player.position, attackGoal.value, model.grid, ignoreSoft)
+        return {
+            ...player,
+            botState: "ATTACK",
+            botGoal: attackGoal.value,
+            botPath: path,
+            aiDirection: getDirectionToNextCell(player, path)
+        }
+    }
+
+    // 4. Wander randomly
+    const randomGoal = findRandomGoal(model)
+    const path = randomGoal.row !== -1 ? findShortestPath(player.position, randomGoal, model.grid) : []
+    return {
+        ...player,
+        botState: "WANDER",
+        botGoal: randomGoal,
+        botPath: path,
+        aiDirection: getDirectionToNextCell(player, path)
+    }
+}
+
+const executeBotState = (player: Player, model: Model): Player => {
+    if (!player.botType) return player
+
+    switch (player.botState) {
+        case "WANDER":
+            return executeWander(player, model)
+        case "ESCAPE":
+            return executeEscape(player, model)
+        case "ATTACK":
+            return executeAttack(player, model)
+        case "GET_POWERUP":
+            return executeGetPowerup(player, model)
+        default:
+            return player
+    }
+}
+
+const executeWander = (player: Player, model: Model): Player => {
+    const goalRow = Math.round(player.botGoal.row)
+    const goalCol = Math.round(player.botGoal.col)
+
+    if (goalRow < 0 || goalRow >= GRID_ROWS || goalCol < 0 || goalCol >= GRID_COLS ||
+        player.botPath.length === 0 ||
+        (Math.round(player.position.row) === goalRow && Math.round(player.position.col) === goalCol)) {
+        return performReevaluation(player, model)
+    }
+
+    return followPath(player, model)
+}
+
+const executeEscape = (player: Player, model: Model): Player => {
+    const goalRow = Math.round(player.botGoal.row)
+    const goalCol = Math.round(player.botGoal.col)
+
+    if (goalRow < 0 || goalRow >= GRID_ROWS || goalCol < 0 || goalCol >= GRID_COLS ||
+        player.botPath.length === 0 ||
+        (Math.round(player.position.row) === goalRow && Math.round(player.position.col) === goalCol) ||
+        isInDanger(player, model)) {
+        return performReevaluation(player, model)
+    }
+
+    return followPath(player, model)
+}
+
+const executeAttack = (player: Player, model: Model): Player => {
+    const goalRow = Math.round(player.botGoal.row)
+    const goalCol = Math.round(player.botGoal.col)
+
+    if (goalRow < 0 || goalRow >= GRID_ROWS || goalCol < 0 || goalCol >= GRID_COLS) {
+        return performReevaluation(player, model)
+    }
+
+    let targetExists = false
+    for (const p of model.players) {
+        if (p.id !== player.id && p.isAlive &&
+            Math.round(p.position.row) === goalRow &&
+            Math.round(p.position.col) === goalCol) {
+            targetExists = true
+            break
+        }
+    }
+
+    if (!targetExists || player.botPath.length === 0) {
+        return performReevaluation(player, model)
+    }
+
+    return followPath(player, model)
+}
+
+const executeGetPowerup = (player: Player, model: Model): Player => {
+    const goalRow = Math.round(player.botGoal.row)
+    const goalCol = Math.round(player.botGoal.col)
+
+    if (goalRow < 0 || goalRow >= GRID_ROWS || goalCol < 0 || goalCol >= GRID_COLS) {
+        return performReevaluation(player, model)
+    }
+
+    if (player.botPath.length === 0 || !model.grid[goalRow][goalCol].powerup) {
+        return performReevaluation(player, model)
+    }
+
+    return followPath(player, model)
+}
+
+const followPath = (player: Player, model: Model): Player => {
+    if (player.botPath.length === 0) return player
+
+    const nextCell = player.botPath[0]
+    const currentRow = Math.round(player.position.row)
+    const currentCol = Math.round(player.position.col)
+    const nextRow = Math.round(nextCell.row)
+    const nextCol = Math.round(nextCell.col)
+
+    let aiDirection = player.aiDirection
+    if (nextRow < currentRow) aiDirection = "up"
+    else if (nextRow > currentRow) aiDirection = "down"
+    else if (nextCol < currentCol) aiDirection = "left"
+    else if (nextCol > currentCol) aiDirection = "right"
+
+    let newPath = player.botPath
+    if (Math.abs(player.position.row - nextCell.row) < 0.3 &&
+        Math.abs(player.position.col - nextCell.col) < 0.3) {
+        newPath = player.botPath.slice(1)
+    }
+
+    return {
+        ...player,
+        botPath: newPath,
+        aiDirection
+    }
+}
+
+const getDirectionToNextCell = (player: Player, path: Position[]): "up" | "down" | "left" | "right" | null => {
+    if (path.length === 0) return null
+    const nextCell = path[0]
+    const currentRow = Math.round(player.position.row)
+    const currentCol = Math.round(player.position.col)
+    const nextRow = Math.round(nextCell.row)
+    const nextCol = Math.round(nextCell.col)
+
+    if (nextRow < currentRow) return "up"
+    if (nextRow > currentRow) return "down"
+    if (nextCol < currentCol) return "left"
+    if (nextCol > currentCol) return "right"
+    return null
+}
+
+const shouldPlantBomb = (player: Player, model: Model): boolean => {
+    if (player.botState === "ATTACK") {
+        for (const enemy of model.players) {
+            if (enemy.id !== player.id && enemy.isAlive) {
+                const dist = manhattanDistance(player.position, enemy.position)
+                if (dist <= player.attackPlantDistance) return true
+            }
+        }
+    }
+
+    if (player.botState === "WANDER" && player.botPath.length > 0) {
+        const nextCell = player.botPath[0]
+        const row = Math.round(nextCell.row)
+        const col = Math.round(nextCell.col)
+        if (row >= 0 && row < GRID_ROWS && col >= 0 && col < GRID_COLS) {
+            const cell = model.grid[row][col]
+            return cell.type === "soft" && !cell.isDestroying
+        }
+    }
+
+    return false
+}
+
+const isInDanger = (player: Player, model: Model): boolean => {
+    const playerRow = Math.round(player.position.row)
+    const playerCol = Math.round(player.position.col)
+
+    for (let dr = -player.dangerCheckDistance; dr <= player.dangerCheckDistance; dr++) {
+        for (let dc = -player.dangerCheckDistance; dc <= player.dangerCheckDistance; dc++) {
+            if (Math.abs(dr) + Math.abs(dc) > player.dangerCheckDistance) continue
+            const checkRow = playerRow + dr
+            const checkCol = playerCol + dc
+            if (checkRow >= 0 && checkRow < GRID_ROWS && checkCol >= 0 && checkCol < GRID_COLS) {
+                if (isCellDangerous(checkRow, checkCol, model, player)) return true
+            }
+        }
+    }
+
+    return false
+}
+
+const isCellDangerous = (row: number, col: number, model: Model, player: Player): boolean => {
+    // Check explosions
+    for (const exp of model.explosions) {
+        for (const pos of exp.cells) {
+            if (Math.round(pos.row) === row && Math.round(pos.col) === col) return true
+        }
+    }
+
+    // Check based on detection policy
+    if (player.dangerDetectionPolicy === "bombs_only") {
+        for (const bomb of model.bombs) {
+            if (Math.round(bomb.position.row) === row && Math.round(bomb.position.col) === col) {
+                return true
+            }
+        }
+    } else if (player.dangerDetectionPolicy === "explosion_range") {
+        for (const bomb of model.bombs) {
+            const bombRow = Math.round(bomb.position.row)
+            const bombCol = Math.round(bomb.position.col)
+            if (isInExplosionRange(row, col, bombRow, bombCol, bomb.range, model.grid)) {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+const isInExplosionRange = (row: number, col: number, bombRow: number, bombCol: number, range: number, grid: Cell[][]): boolean => {
+    if (row === bombRow && col > bombCol) {
+        for (let c = bombCol + 1; c <= Math.min(bombCol + range, GRID_COLS - 1); c++) {
+            if (c === col) return true
+            if (grid[row][c].type === "hard") break
+            if (grid[row][c].type === "soft" && !grid[row][c].isDestroying) break
+        }
+    }
+    if (row === bombRow && col < bombCol) {
+        for (let c = bombCol - 1; c >= Math.max(bombCol - range, 0); c--) {
+            if (c === col) return true
+            if (grid[row][c].type === "hard") break
+            if (grid[row][c].type === "soft" && !grid[row][c].isDestroying) break
+        }
+    }
+    if (col === bombCol && row > bombRow) {
+        for (let r = bombRow + 1; r <= Math.min(bombRow + range, GRID_ROWS - 1); r++) {
+            if (r === row) return true
+            if (grid[r][col].type === "hard") break
+            if (grid[r][col].type === "soft" && !grid[r][col].isDestroying) break
+        }
+    }
+    if (col === bombCol && row < bombRow) {
+        for (let r = bombRow - 1; r >= Math.max(bombRow - range, 0); r--) {
+            if (r === row) return true
+            if (grid[r][col].type === "hard") break
+            if (grid[r][col].type === "soft" && !grid[r][col].isDestroying) break
+        }
+    }
+    return false
+}
+
+const findSafeGoal = (player: Player, model: Model): Position => {
+    const safeSpots: Position[] = []
+    for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+            if (model.grid[r][c].type === "empty" && !isCellDangerous(r, c, model, player)) {
+                const goal = Position.make({ row: r, col: c })
+                if (isReachable(player.position, goal, model.grid)) {
+                    safeSpots.push(goal)
+                }
+            }
+        }
+    }
+
+    return safeSpots.length > 0
+        ? safeSpots[Math.floor(Math.random() * safeSpots.length)]
+        : Position.make({ row: -1, col: -1 })
+}
+
+const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> => {
+    const powerups: Position[] = []
+    for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+            if (model.grid[r][c].powerup) {
+                powerups.push(Position.make({ row: r, col: c }))
+            }
+        }
+    }
+
+    if (powerups.length === 0) return Option.none()
+
+    if (player.powerupPolicy === "first") {
+        let best: Position | null = null
+        let minDist = Infinity
+        for (const p of powerups) {
+            const dist = manhattanDistance(player.position, p)
+            if (dist < minDist && isReachable(player.position, p, model.grid)) {
+                minDist = dist
+                best = p
+            }
+        }
+        return best ? Option.some(best) : Option.none()
+    } else {
+        const nearby = powerups.filter(p =>
+            manhattanDistance(player.position, p) <= 4 &&
+            isReachable(player.position, p, model.grid) &&
+            Math.random() < player.powerupPolicyChance
+        )
+        return nearby.length > 0
+            ? Option.some(nearby[Math.floor(Math.random() * nearby.length)])
+            : Option.none()
+    }
+}
+
+const findAttackGoal = (player: Player, model: Model): Option.Option<Position> => {
+    const enemies = model.players.filter(p => p.id !== player.id && p.isAlive)
+    if (enemies.length === 0) return Option.none()
+
+    if (player.attackPolicy === "first") {
+        for (const enemy of enemies) {
+            const dist = manhattanDistance(player.position, enemy.position)
+            if (dist <= player.attackTargetDistance && isReachable(player.position, enemy.position, model.grid)) {
+                return Option.some(Position.make({
+                    row: Math.round(enemy.position.row),
+                    col: Math.round(enemy.position.col)
+                }))
+            }
+        }
+        return Option.none()
+    } else {
+        const enemy = enemies[Math.floor(Math.random() * enemies.length)]
+        return Option.some(Position.make({
+            row: Math.round(enemy.position.row),
+            col: Math.round(enemy.position.col)
+        }))
+    }
+}
+
+const findRandomGoal = (model: Model): Position => {
+    let attempts = 0
+    while (attempts < 50) {
+        const r = Math.floor(Math.random() * GRID_ROWS)
+        const c = Math.floor(Math.random() * GRID_COLS)
+        if (model.grid[r][c].type !== "hard") {
+            return Position.make({ row: r, col: c })
+        }
+        attempts++
+    }
+    return Position.make({ row: -1, col: -1 })
+}
+
+// ==================== PLAYER MOVEMENT ====================
 const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): Player => {
     if (!player.isAlive || model.state !== "playing") return player
 
@@ -397,26 +725,10 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
     } else {
         if (player.aiDirection) {
             switch (player.aiDirection) {
-                case "up":
-                    dRow -= player.speed;
-                    newDirection = "up";
-                    isMoving = true;
-                    break
-                case "down":
-                    dRow += player.speed;
-                    newDirection = "down";
-                    isMoving = true;
-                    break
-                case "left":
-                    dCol -= player.speed;
-                    newDirection = "left";
-                    isMoving = true;
-                    break
-                case "right":
-                    dCol += player.speed;
-                    newDirection = "right";
-                    isMoving = true;
-                    break
+                case "up": dRow -= player.speed; newDirection = "up"; isMoving = true; break
+                case "down": dRow += player.speed; newDirection = "down"; isMoving = true; break
+                case "left": dCol -= player.speed; newDirection = "left"; isMoving = true; break
+                case "right": dCol += player.speed; newDirection = "right"; isMoving = true; break
             }
         }
     }
@@ -441,18 +753,17 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
         }
     }
 
-    return Player.make({
+    return {
         ...player,
         position: nextPos,
         direction: newDirection,
         isMoving
-    })
+    }
 }
 
 const canMoveTo = (row: number, col: number, oldPos: Position, model: Model): boolean => {
     const size = 0.7
     const offset = (1 - size) / 2
-
     const corners = [
         { r: row + offset, c: col + offset },
         { r: row + offset, c: col + size + offset },
@@ -460,236 +771,208 @@ const canMoveTo = (row: number, col: number, oldPos: Position, model: Model): bo
         { r: row + size + offset, c: col + size + offset }
     ]
 
+    // Where is the player's center currently?
+    const currentCenterR = Math.round(oldPos.row)
+    const currentCenterC = Math.round(oldPos.col)
+
     for (const corner of corners) {
         const r = Math.floor(corner.r)
         const c = Math.floor(corner.c)
 
-        if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) {
-            return false
-        }
+        // 1. Boundary check
+        if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false
 
+        // 2. Hard block check
         const cell = model.grid[r][c]
+        if (cell.type === "hard") return false
 
-        if (cell.type === "hard" || (cell.type === "soft" && !cell.isDestroying)) {
-            return false
-        }
+        // 3. Soft block check (if not being destroyed)
+        if (cell.type === "soft" && !cell.isDestroying) return false
 
-        const bombAtCell = EffectArray.findFirst(model.bombs, b =>
-            Math.round(b.position.row) === r &&
-            Math.round(b.position.col) === c
-        )
+        // 4. Bomb check
+        const bomb = model.bombs.find(b => {
+            const bombR = Math.round(b.position.row)
+            const bombC = Math.round(b.position.col)
+            return bombR === r && bombC === c
+        })
 
-        if (bombAtCell._tag === "Some") {
-            const isOverlapping = doesOverlap(oldPos, r, c)
-            if (!isOverlapping) {
-                return false
+        if (bomb) {
+            // Can we walk through this bomb?
+            // Only if we're currently centered in this cell
+            const isCurrentCell = (r === currentCenterR && c === currentCenterC)
+
+            if (!isCurrentCell) {
+                return false // Can't walk into a bomb from another cell
             }
+            // If we ARE in this cell, we can walk out of it
         }
     }
 
     return true
 }
 
-const doesOverlap = (pos: Position, cellR: number, cellC: number): boolean => {
-    const playerLeft = pos.col
-    const playerRight = pos.col + 1
-    const playerTop = pos.row
-    const playerBottom = pos.row + 1
+// ==================== GAME LOGIC FUNCTIONS ====================
+const updatePlayerTimers = (player: Player): Player => {
+    let updatedPlayer = player
 
-    const cellLeft = cellC
-    const cellRight = cellC + 1
-    const cellTop = cellR
-    const cellBottom = cellR + 1
-
-    return !(playerLeft >= cellRight ||
-             playerRight <= cellLeft ||
-             playerTop >= cellBottom ||
-             playerBottom <= cellTop)
-}
-
-const isSafeMove = (pos: Position, dir: "up" | "down" | "left" | "right", model: Model): boolean => {
-    let r = Math.round(pos.row)
-    let c = Math.round(pos.col)
-
-    switch (dir) {
-        case "up": r--; break
-        case "down": r++; break
-        case "left": c--; break
-        case "right": c++; break
+    if (updatedPlayer.hasVest) {
+        const newVestTimer = Math.max(0, updatedPlayer.vestTimer - 1 / FPS)
+        if (newVestTimer <= 0) {
+            updatedPlayer = { ...updatedPlayer, hasVest: false, vestTimer: 0 }
+        } else {
+            updatedPlayer = { ...updatedPlayer, vestTimer: newVestTimer }
+        }
     }
 
-    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) {
-        return false
+    const timers = updatedPlayer.rainbowTimers
+    let hasActiveRainbow = false
+
+    let newFireUp = timers.FireUp
+    let newBombUp = timers.BombUp
+    let newSpeedUp = timers.SpeedUp
+
+    if (timers.FireUp > 0) {
+        newFireUp = Math.max(0, timers.FireUp - 1 / FPS)
+        hasActiveRainbow = true
+    }
+    if (timers.BombUp > 0) {
+        newBombUp = Math.max(0, timers.BombUp - 1 / FPS)
+        hasActiveRainbow = true
+    }
+    if (timers.SpeedUp > 0) {
+        newSpeedUp = Math.max(0, timers.SpeedUp - 1 / FPS)
+        hasActiveRainbow = true
     }
 
-    const cell = model.grid[r][c]
-    return cell.type === "empty" &&
-           !cell.hasExplosion &&
-           !isBombAt(Position.make({ row: r, col: c }), model.bombs)
+    if (!hasActiveRainbow) {
+        updatedPlayer = {
+            ...updatedPlayer,
+            bombRange: Math.max(1, updatedPlayer.bombRange - 3),
+            maxBombs: Math.max(1, updatedPlayer.maxBombs - 3),
+            speed: Math.max(BASE_SPEED, updatedPlayer.speed - SPEED_INCREMENT * 3)
+        }
+    }
+
+    return {
+        ...updatedPlayer,
+        rainbowTimers: {
+            FireUp: newFireUp,
+            BombUp: newBombUp,
+            SpeedUp: newSpeedUp
+        }
+    }
 }
 
 const checkPowerupCollection = (model: Model): Model => {
-    const result = EffectArray.reduce(model.players, {
-        grid: model.grid,
-        players: [] as Player[]
-    }, (acc, player) => {
-        if (!player.isAlive) {
-            return {
-                ...acc,
-                players: EffectArray.append(acc.players, player)
-            }
-        }
+    let newGrid = model.grid
+    const newPlayers = model.players.map(player => {
+        if (!player.isAlive) return player
 
         const r = Math.round(player.position.row)
         const c = Math.round(player.position.col)
-        const cell = acc.grid[r][c]
+        const cell = newGrid[r][c]
 
         if (cell.powerup && !cell.isDestroying && cell.type === "empty") {
-            let updatedPlayer = { ...player }
-            const powerup = cell.powerup
+            let updatedPlayer = player
 
-            switch (powerup) {
+            switch (cell.powerup) {
                 case "FireUp":
-                    updatedPlayer.bombRange += 1
+                    updatedPlayer = { ...updatedPlayer, bombRange: updatedPlayer.bombRange + 1 }
                     break
-
                 case "BombUp":
-                    updatedPlayer.maxBombs += 1
+                    updatedPlayer = { ...updatedPlayer, maxBombs: updatedPlayer.maxBombs + 1 }
                     break
-
                 case "SpeedUp":
-                    updatedPlayer.speed += SPEED_INCREMENT
+                    updatedPlayer = { ...updatedPlayer, speed: updatedPlayer.speed + SPEED_INCREMENT }
                     break
-
                 case "Rainbow":
-                    updatedPlayer.rainbowTimers = {
-                        FireUp: 10,
-                        BombUp: 10,
-                        SpeedUp: 10
+                    updatedPlayer = {
+                        ...updatedPlayer,
+                        rainbowTimers: { FireUp: 10, BombUp: 10, SpeedUp: 10 }
                     }
                     break
-
                 case "Vest":
-                    updatedPlayer.hasVest = true
-                    updatedPlayer.vestTimer = 10
+                    updatedPlayer = { ...updatedPlayer, hasVest: true, vestTimer: 10 }
                     break
             }
 
-            const newRow = EffectArray.map(acc.grid[r], (cCell, idx) =>
-                idx === c ? Cell.make({ ...cCell, powerup: null }) : cCell
-            )
-            const newGrid = EffectArray.map(acc.grid, (row, idx) =>
-                idx === r ? newRow : row
+            // Remove powerup from grid
+            newGrid = EffectArray.map(newGrid, (gridRow, rowIdx) =>
+                rowIdx !== r ? gridRow : EffectArray.map(gridRow, (gridCell, colIdx) =>
+                    colIdx !== c ? gridCell : Cell.make({ ...gridCell, powerup: null })
+                )
             )
 
-            return {
-                grid: newGrid,
-                players: EffectArray.append(acc.players, Player.make(updatedPlayer))
-            }
+            return updatedPlayer
         }
-
-        return {
-            ...acc,
-            players: EffectArray.append(acc.players, player)
-        }
+        return player
     })
 
-    return Model.make({
-        ...model,
-        grid: result.grid,
-        players: result.players
-    })
+    return { ...model, grid: newGrid, players: newPlayers }
 }
 
-const updateBombsAndExplosions = (model: Model): Partial<Model> => {
-    let activeExplosions = EffectArray.filter(model.explosions, explosion =>
+const updateBombsAndExplosions = (model: Model): Model => {
+    // Filter active explosions
+    const activeExplosions = model.explosions.filter(explosion =>
         (model.currentTime - explosion.createdAt) < FPS * EXPLOSION_DURATION
     )
 
+    // Check which bombs should explode
     const explodingBombIndices: number[] = []
-    EffectArray.forEach(model.bombs, (bomb, index) => {
+    const newExplosions: Explosion[] = []
+
+    model.bombs.forEach((bomb, index) => {
         const r = Math.round(bomb.position.row)
         const c = Math.round(bomb.position.col)
-
         const timeElapsed = (model.currentTime - bomb.plantedAt) / FPS
         const hitByExplosion = model.grid[r][c].hasExplosion
 
         if (timeElapsed >= BOMB_TIMER || hitByExplosion) {
             explodingBombIndices.push(index)
-        }
-    })
 
-    if (explodingBombIndices.length === 0) {
-        const activeExplosionCells = new Set(
-            EffectArray.flatMap(activeExplosions, e => e.cells)
-                .map(p => `${Math.round(p.row)},${Math.round(p.col)}`)
-        )
+            // Create explosion
+            const cells: Position[] = []
+            const center = { r, c }
 
-        const newGrid = EffectArray.map(model.grid, (row, r) =>
-            EffectArray.map(row, (cell, c) =>
-                Cell.make({
-                    ...cell,
-                    hasExplosion: activeExplosionCells.has(`${r},${c}`)
-                })
-            )
-        )
+            cells.push(Position.make({ row: center.r, col: center.c }))
 
-        return {
-            grid: newGrid,
-            explosions: activeExplosions
-        }
-    }
+            const directions = [
+                { dr: 0, dc: 1 },
+                { dr: 0, dc: -1 },
+                { dr: 1, dc: 0 },
+                { dr: -1, dc: 0 }
+            ]
 
-    const newExplosions: Explosion[] = []
+            for (const { dr, dc } of directions) {
+                for (let k = 1; k <= bomb.range; k++) {
+                    const r = center.r + dr * k
+                    const c = center.c + dc * k
 
-    EffectArray.forEach(model.bombs, (bomb, index) => {
-        if (!explodingBombIndices.includes(index)) return
+                    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) break
 
-        const cells: Position[] = []
-        const center = {
-            r: Math.round(bomb.position.row),
-            c: Math.round(bomb.position.col)
-        }
+                    const cell = model.grid[r][c]
+                    if (cell.type === "hard") break
 
-        cells.push(Position.make({ row: center.r, col: center.c }))
+                    cells.push(Position.make({ row: r, col: c }))
 
-        const directions = [
-            { dr: 0, dc: 1 },
-            { dr: 0, dc: -1 },
-            { dr: 1, dc: 0 },
-            { dr: -1, dc: 0 }
-        ]
-
-        for (const { dr, dc } of directions) {
-            for (let k = 1; k <= bomb.range; k++) {
-                const r = center.r + dr * k
-                const c = center.c + dc * k
-
-                if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) break
-
-                const cell = model.grid[r][c]
-
-                if (cell.type === "hard") break
-
-                cells.push(Position.make({ row: r, col: c }))
-
-                if (cell.type === "soft" && !cell.isDestroying) break
+                    if (cell.type === "soft" && !cell.isDestroying) break
+                }
             }
-        }
 
-        newExplosions.push(Explosion.make({
-            cells,
-            createdAt: model.currentTime
-        }))
+            newExplosions.push(Explosion.make({
+                cells,
+                createdAt: model.currentTime
+            }))
+        }
     })
 
-    const allExplosions = EffectArray.appendAll(activeExplosions, newExplosions)
-
+    // Combine explosions
+    const allExplosions = [...activeExplosions, ...newExplosions]
     const activeExplosionCells = new Set(
-        EffectArray.flatMap(allExplosions, e => e.cells)
-            .map(p => `${Math.round(p.row)},${Math.round(p.col)}`)
+        allExplosions.flatMap(e => e.cells.map(p => `${Math.round(p.row)},${Math.round(p.col)}`))
     )
 
+    // Update grid with explosions
     const newGrid = EffectArray.map(model.grid, (row, r) =>
         EffectArray.map(row, (cell, c) => {
             const isExplosion = activeExplosionCells.has(`${r},${c}`)
@@ -739,34 +1022,32 @@ const updateBombsAndExplosions = (model: Model): Partial<Model> => {
         })
     )
 
-    const remainingBombs = EffectArray.filter(model.bombs, (_, index) =>
-        !explodingBombIndices.includes(index)
-    )
+    // Remove exploded bombs
+    const remainingBombs = model.bombs.filter((_, index) => !explodingBombIndices.includes(index))
 
-    const updatedPlayers = EffectArray.map(model.players, player => {
-        const bombsExploded = EffectArray.filter(model.bombs, (bomb, index) =>
-            bomb.playerId === player.id && explodingBombIndices.includes(index)
+    // Update player active bomb counts
+    const newPlayers = model.players.map(player => {
+        const bombsExploded = explodingBombIndices.filter(index =>
+            model.bombs[index].playerId === player.id
         ).length
 
         if (bombsExploded > 0) {
-            return Player.make({
-                ...player,
-                activeBombs: Math.max(0, player.activeBombs - bombsExploded)
-            })
+            return { ...player, activeBombs: Math.max(0, player.activeBombs - bombsExploded) }
         }
         return player
     })
 
     return {
+        ...model,
         grid: newGrid,
         bombs: remainingBombs,
         explosions: allExplosions,
-        players: updatedPlayers
+        players: newPlayers
     }
 }
 
 const checkDeaths = (model: Model): Model => {
-    const updatedPlayers = EffectArray.map(model.players, player => {
+    const newPlayers = model.players.map(player => {
         if (!player.isAlive) return player
 
         const corners = [
@@ -778,10 +1059,7 @@ const checkDeaths = (model: Model): Model => {
 
         let isHit = false
         for (const corner of corners) {
-            if (corner.r < 0 || corner.r >= GRID_ROWS || corner.c < 0 || corner.c >= GRID_COLS) {
-                continue
-            }
-
+            if (corner.r < 0 || corner.r >= GRID_ROWS || corner.c < 0 || corner.c >= GRID_COLS) continue
             if (model.grid[corner.r][corner.c].hasExplosion) {
                 isHit = true
                 break
@@ -789,44 +1067,76 @@ const checkDeaths = (model: Model): Model => {
         }
 
         if (isHit && player.hasVest) {
-            return Player.make({
-                ...player,
-                hasVest: false,
-                vestTimer: 0
-            })
+            return { ...player, hasVest: false, vestTimer: 0 }
         }
 
-        if (isHit) {
-            return Player.make({ ...player, isAlive: false })
-        }
-
+        if (isHit) return { ...player, isAlive: false }
         return player
     })
 
-    const alivePlayers = EffectArray.filter(updatedPlayers, p => p.isAlive)
-    const deathOccurred = updatedPlayers.length !== alivePlayers.length
-
-    let newDeathTimer = model.deathTimer
-    if (deathOccurred && model.deathTimer === null) {
-        newDeathTimer = model.currentTime
+    const alivePlayers = newPlayers.filter(p => p.isAlive)
+    if (alivePlayers.length <= 1 && model.players.length > 1 && model.state === "playing") {
+        const winner = alivePlayers.length === 1 ? alivePlayers[0] : null
+        return endRound({ ...model, players: newPlayers }, winner ? winner.label : "Draw")
     }
 
-    if (newDeathTimer !== null) {
-        const timeSinceDeath = (model.currentTime - newDeathTimer) / FPS
+    return { ...model, players: newPlayers }
+}
 
-        if (timeSinceDeath >= 1.0) {
-            if (alivePlayers.length === 0) {
-                return endRound({ ...model, players: updatedPlayers }, "Draw")
-            } else if (alivePlayers.length === 1) {
-                return endRound({ ...model, players: updatedPlayers }, alivePlayers[0].label)
-            }
-            newDeathTimer = null
-        }
-    }
+const endRound = (model: Model, winnerLabel: string): Model => {
+    const newPlayers = model.players.map(player =>
+        player.label === winnerLabel
+            ? { ...player, wins: player.wins + 1 }
+            : player
+    )
 
-    return Model.make({
+    const matchWinner = newPlayers.find(player => player.wins >= model.roundsToWin)
+
+    return {
         ...model,
-        players: updatedPlayers,
-        deathTimer: newDeathTimer
-    })
+        players: newPlayers,
+        state: matchWinner ? "matchOver" : "roundOver",
+        roundWinner: winnerLabel,
+        gamePhase: "gameOver",
+        gameOverMessage: matchWinner ? `${winnerLabel} WINS MATCH!` : `${winnerLabel} WINS ROUND!`
+    }
+}
+
+const handleRestartGame = (): Model => {
+    return {
+        ...initModel,
+        grid: createGrid(),
+        state: "warmup"
+    }
+}
+
+const handleStartNextRound = (model: Model): Model => {
+    return {
+        ...model,
+        grid: createGrid(),
+        players: initModel.players.map((p, i) => ({
+            ...model.players[i],
+            position: p.startPosition,
+            isAlive: true,
+            activeBombs: 0,
+            speed: BASE_SPEED,
+            bombRange: 1,
+            maxBombs: 1,
+            hasVest: false,
+            vestTimer: 0,
+            rainbowTimers: { FireUp: 0, BombUp: 0, SpeedUp: 0 },
+            direction: "down",
+            isMoving: false,
+            botState: p.botType ? "WANDER" : null,
+            botGoal: Position.make({ row: -1, col: -1 }),
+            botPath: [],
+            lastReevaluation: 0,
+            aiDirection: null
+        })),
+        bombs: [],
+        explosions: [],
+        state: "warmup",
+        roundTimer: WARMUP_SECONDS * FPS,
+        roundNumber: model.roundNumber + 1
+    }
 }

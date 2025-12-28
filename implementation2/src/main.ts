@@ -20,18 +20,18 @@ const setupEventListeners = () => {
 
     document.addEventListener("keydown", (e) => {
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ",
-             "w", "a", "s", "d", "x", "Escape", "r", "R"].includes(e.key)) {
+            "w", "a", "s", "d", "x", "Escape", "r", "R"].includes(e.key)) {
             e.preventDefault()
+            currentDispatch?.({ _tag: "KeyDown", key: e.key })
         }
-        currentDispatch?.({ _tag: "KeyDown", key: e.key })
     })
 
     document.addEventListener("keyup", (e) => {
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ",
-             "w", "a", "s", "d", "x"].includes(e.key)) {
+            "w", "a", "s", "d", "x"].includes(e.key)) {
             e.preventDefault()
+            currentDispatch?.({ _tag: "KeyUp", key: e.key })
         }
-        currentDispatch?.({ _tag: "KeyUp", key: e.key })
     })
 
     setInterval(() => {

@@ -1,5 +1,4 @@
 import { Schema as S, Array as EffectArray } from "effect"
-import settings from "./settings"
 
 // Constants
 export const GRID_ROWS = 13
@@ -34,7 +33,7 @@ export const Cell = S.Struct({
     ),
 })
 
-// Player
+// Player - UPDATED FOR PHASE 4
 export type Player = typeof Player.Type
 export const Player = S.Struct({
     id: S.Int,
@@ -43,13 +42,24 @@ export const Player = S.Struct({
     isAlive: S.Boolean,
     isHuman: S.Boolean,
 
-    // Bot Configuration
+    // Bot Configuration (Phase 4)
     botType: S.Union(S.Literal("hostile", "careful", "greedy", "extreme"), S.Null),
     botState: S.Union(S.Literal("WANDER", "ATTACK", "ESCAPE", "GET_POWERUP"), S.Null),
     botGoal: Position,
     botPath: S.Array(Position),
     lastReevaluation: S.Int,
     aiDirection: S.Union(S.Literal("up", "down", "left", "right"), S.Null),
+
+    // Bot Configuration Parameters (Phase 4)
+    reevaluationInterval: S.Number,
+    reevaluationChance: S.Number,
+    dangerCheckDistance: S.Int,
+    attackPlantDistance: S.Int,
+    attackTargetDistance: S.Int,
+    dangerDetectionPolicy: S.Union(S.Literal("bombs_only", "explosion_range"), S.Null),
+    attackPolicy: S.Union(S.Literal("first", "second"), S.Null),
+    powerupPolicy: S.Union(S.Literal("first", "second"), S.Null),
+    powerupPolicyChance: S.Number,
 
     // Stats
     speed: S.Number,
@@ -117,6 +127,16 @@ export const Model = S.Struct({
     gameOverMessage: S.String
 })
 
+// Settings
+const settings = {
+    softBlockSpawnChance: 40,
+    powerupSpawnChance: 30,
+    timerSeconds: 180,
+    humanPlayers: 1,
+    botTypes: ["hostile", "careful", "greedy", "extreme"],
+    roundsToWin: 3
+}
+
 // --- Initialization Helpers ---
 
 export const createGrid = (): Cell[][] => {
@@ -165,6 +185,54 @@ export const createGrid = (): Cell[][] => {
     return grid
 }
 
+// Bot configuration presets for Phase 4
+const botConfigs: Record<string, any> = {
+    hostile: {
+        reevaluationInterval: 0.5,
+        reevaluationChance: 0.25,
+        dangerCheckDistance: 0,
+        attackPlantDistance: 2,
+        attackTargetDistance: 0,
+        dangerDetectionPolicy: "bombs_only",
+        attackPolicy: "second",
+        powerupPolicy: "second",
+        powerupPolicyChance: 0.2
+    },
+    careful: {
+        reevaluationInterval: 0.25,
+        reevaluationChance: 1.0,
+        dangerCheckDistance: 4,
+        attackPlantDistance: 4,
+        attackTargetDistance: 3,
+        dangerDetectionPolicy: "explosion_range",
+        attackPolicy: "first",
+        powerupPolicy: "second",
+        powerupPolicyChance: 1.0
+    },
+    greedy: {
+        reevaluationInterval: 1.0,
+        reevaluationChance: 1.0,
+        dangerCheckDistance: 2,
+        attackPlantDistance: 3,
+        attackTargetDistance: 6,
+        dangerDetectionPolicy: "explosion_range",
+        attackPolicy: "first",
+        powerupPolicy: "first",
+        powerupPolicyChance: 1.0
+    },
+    extreme: {
+        reevaluationInterval: 0.1,
+        reevaluationChance: 0.1,
+        dangerCheckDistance: 10,
+        attackPlantDistance: 10,
+        attackTargetDistance: 0,
+        dangerDetectionPolicy: "explosion_range",
+        attackPolicy: "second",
+        powerupPolicy: "first",
+        powerupPolicyChance: 1.0
+    }
+}
+
 export const initPlayers = (): Player[] => {
     const players: Player[] = []
     const humanCount = Math.min(2, Math.max(1, settings.humanPlayers))
@@ -186,7 +254,8 @@ export const initPlayers = (): Player[] => {
 
     for (let i = 0; i < Math.min(4, humanCount + botTypes.length); i++) {
         const isHuman = i < humanCount
-        const botType = isHuman ? null : botTypes[i - humanCount] as any
+        const botType = isHuman ? null : (botTypes[i - humanCount] as string)
+        const config = botType ? botConfigs[botType] : null
 
         players.push(Player.make({
             id: i + 1,
@@ -201,6 +270,15 @@ export const initPlayers = (): Player[] => {
             botPath: [],
             lastReevaluation: 0,
             aiDirection: null,
+            reevaluationInterval: config?.reevaluationInterval || 0,
+            reevaluationChance: config?.reevaluationChance || 0,
+            dangerCheckDistance: config?.dangerCheckDistance || 0,
+            attackPlantDistance: config?.attackPlantDistance || 0,
+            attackTargetDistance: config?.attackTargetDistance || 0,
+            dangerDetectionPolicy: config?.dangerDetectionPolicy || null,
+            attackPolicy: config?.attackPolicy || null,
+            powerupPolicy: config?.powerupPolicy || null,
+            powerupPolicyChance: config?.powerupPolicyChance || 0,
             speed: BASE_SPEED,
             bombRange: 1,
             maxBombs: 1,
