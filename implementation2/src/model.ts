@@ -10,7 +10,6 @@ export const BOMB_TIMER = 3
 export const EXPLOSION_DURATION = 1
 export const BASE_SPEED = 0.15
 export const SPEED_INCREMENT = 0.05
-// FIX: Increased delay to > 1.0s so item reveals AFTER explosion fades
 export const DESTRUCTION_DELAY = 1.1
 export const WARMUP_SECONDS = 3
 export const GAME_DURATION = 180
@@ -184,7 +183,7 @@ const botConfigs: Record<string, any> = {
         reevaluationChance: 0.25,
         dangerCheckDistance: 0,
         attackPlantDistance: 2,
-        attackTargetDistance: 0,
+        attackTargetDistance: 15, // FIX: Increased from 0 to actually see enemies
         dangerDetectionPolicy: "bombs_only",
         attackPolicy: "second",
         powerupPolicy: "second",
@@ -217,7 +216,7 @@ const botConfigs: Record<string, any> = {
         reevaluationChance: 0.1,
         dangerCheckDistance: 10,
         attackPlantDistance: 10,
-        attackTargetDistance: 0,
+        attackTargetDistance: 15, // FIX: Increased to 15 (global-ish)
         dangerDetectionPolicy: "explosion_range",
         attackPolicy: "second",
         powerupPolicy: "first",
@@ -229,6 +228,9 @@ export const initPlayers = (): Player[] => {
     const players: Player[] = []
     const humanCount = Math.min(2, Math.max(1, settings.humanPlayers))
     const botTypes = settings.botTypes || []
+
+    // Using EffectArray.makeBy to generate players functionally
+    const totalPlayers = Math.min(4, humanCount + botTypes.length)
 
     const positions = [
         { row: 1, col: 1 },
@@ -244,12 +246,12 @@ export const initPlayers = (): Player[] => {
         { main: "#FFFF00", sub: "#800080" }
     ]
 
-    for (let i = 0; i < Math.min(4, humanCount + botTypes.length); i++) {
+    return EffectArray.makeBy(totalPlayers, (i) => {
         const isHuman = i < humanCount
         const botType = isHuman ? null : (botTypes[i - humanCount] as string)
         const config = botType ? botConfigs[botType] : null
 
-        players.push(Player.make({
+        return Player.make({
             id: i + 1,
             label: `P${i + 1}`,
             position: Position.make(positions[i]),
@@ -283,10 +285,8 @@ export const initPlayers = (): Player[] => {
             direction: "down",
             isMoving: false,
             wins: 0
-        }))
-    }
-
-    return players
+        })
+    })
 }
 
 export const initModel = Model.make({
