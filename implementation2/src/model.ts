@@ -10,7 +10,8 @@ export const BOMB_TIMER = 3
 export const EXPLOSION_DURATION = 1
 export const BASE_SPEED = 0.15
 export const SPEED_INCREMENT = 0.05
-export const DESTRUCTION_DELAY = 0.5
+// FIX: Increased delay to > 1.0s so item reveals AFTER explosion fades
+export const DESTRUCTION_DELAY = 1.1
 export const WARMUP_SECONDS = 3
 export const GAME_DURATION = 180
 
@@ -34,7 +35,7 @@ export const Cell = S.Struct({
     ),
 })
 
-// Player - UPDATED FOR PHASE 4
+// Player
 export type Player = typeof Player.Type
 export const Player = S.Struct({
     id: S.Int,
@@ -43,7 +44,7 @@ export const Player = S.Struct({
     isAlive: S.Boolean,
     isHuman: S.Boolean,
 
-    // Bot Configuration (Phase 4)
+    // Bot Configuration
     botType: S.Union(S.Literal("hostile", "careful", "greedy", "extreme"), S.Null),
     botState: S.Union(S.Literal("WANDER", "ATTACK", "ESCAPE", "GET_POWERUP"), S.Null),
     botGoal: Position,
@@ -51,7 +52,7 @@ export const Player = S.Struct({
     lastReevaluation: S.Int,
     aiDirection: S.Union(S.Literal("up", "down", "left", "right"), S.Null),
 
-    // Bot Configuration Parameters (Phase 4)
+    // Bot Configuration Parameters
     reevaluationInterval: S.Number,
     reevaluationChance: S.Number,
     dangerCheckDistance: S.Int,
@@ -176,7 +177,7 @@ export const createGrid = (): Cell[][] => {
     return grid
 }
 
-// Bot configuration presets for Phase 4
+// Bot configuration presets
 const botConfigs: Record<string, any> = {
     hostile: {
         reevaluationInterval: 0.5,
@@ -211,7 +212,7 @@ const botConfigs: Record<string, any> = {
         powerupPolicy: "first",
         powerupPolicyChance: 1.0
     },
-    extreme: { // Phase 4 Option 4
+    extreme: {
         reevaluationInterval: 0.1,
         reevaluationChance: 0.1,
         dangerCheckDistance: 10,

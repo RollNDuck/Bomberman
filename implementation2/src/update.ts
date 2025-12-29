@@ -23,7 +23,13 @@ export const update = (msg: Msg, model: Model): Model => {
 }
 
 const handleKeyDown = (key: string, model: Model): Model => {
-    if (key === "Escape") return { ...model, isDebugMode: !model.isDebugMode }
+    if (key === "Escape") {
+        if (model.state === "roundOver" || model.state === "matchOver") {
+            return model.state === "matchOver" ? handleRestartGame() : handleStartNextRound(model)
+        }
+        return { ...model, isDebugMode: !model.isDebugMode }
+    }
+
     if ((key === "r" || key === "R") && (model.state === "roundOver" || model.state === "matchOver")) {
         return model.state === "matchOver" ? handleRestartGame() : handleStartNextRound(model)
     }
@@ -213,6 +219,12 @@ const performReevaluation = (player: Player, model: Model): Player => {
     if (isInDanger(player, model)) {
         const safeGoal = findSafeGoal(player, model)
         const path = safeGoal.row !== -1 ? findShortestPath(player.position, safeGoal, model, false) : []
+        // CRITICAL FIX: If trapped, default to WANDER to try random movement instead of freezing
+        if (path.length === 0 && safeGoal.row !== -1) {
+             const randomGoal = findRandomGoal(model)
+             const randPath = randomGoal.row !== -1 ? findShortestPath(player.position, randomGoal, model, true) : []
+             return { ...player, botState: "WANDER", botGoal: randomGoal, botPath: randPath }
+        }
         return { ...player, botState: "ESCAPE", botGoal: safeGoal, botPath: path }
     }
     const powerupGoal = findPowerupGoal(player, model)
@@ -236,12 +248,10 @@ const executeBotState = (player: Player, model: Model): Player => {
 
     if (player.botState === "WANDER" && (!validGoal || (Math.round(player.position.row) === goalR && Math.round(player.position.col) === goalC) || player.botPath.length === 0)) return performReevaluation(player, model)
 
-    // ESCAPE FIX: Only re-eval if we are SAFE (success) or path failed.
-    // Do NOT re-eval just because we are in danger, because we ARE escaping danger.
     if (player.botState === "ESCAPE") {
-        if (!isInDanger(player, model)) return performReevaluation(player, model) // We escaped! Go back to wandering.
-        if (!validGoal || player.botPath.length === 0) return performReevaluation(player, model) // We are stuck or lost path
-        return player // Keep escaping
+        if (!isInDanger(player, model)) return performReevaluation(player, model)
+        if (!validGoal || player.botPath.length === 0) return performReevaluation(player, model)
+        return player
     }
 
     if (player.botState === "GET_POWERUP" && (!validGoal || !model.grid[goalR][goalC].powerup || player.botPath.length === 0)) return performReevaluation(player, model)
@@ -252,7 +262,6 @@ const executeBotState = (player: Player, model: Model): Player => {
 
 // ==================== GOAL FINDING ====================
 const findSafeGoal = (player: Player, model: Model): Position => {
-    // ESCAPE FIX: ignoreSoftBlocks = false.
     const reachable = getReachableCells(player.position, model, false)
     const safeSpots: Position[] = []
     for (let r = 0; r < GRID_ROWS; r++) {
@@ -542,11 +551,16 @@ const updateBombsAndExplosions = (model: Model): Model => {
                 let pup: any = null
                 if (spawn) {
                     const rnd = Math.random()
-                    pup = rnd < 0.2 ? "FireUp" : rnd < 0.4 ? "BombUp" : rnd < 0.6 ? "SpeedUp" : rnd < 0.8 ? "Rainbow" : "Vest"
+                    // Adjusted spawn rates: 30% each common, 5% each special
+                    pup = rnd < 0.3 ? "FireUp" : rnd < 0.6 ? "BombUp" : rnd < 0.9 ? "SpeedUp" : rnd < 0.95 ? "Rainbow" : "Vest"
                 }
-                return Cell.make({ ...cell, type: "empty", hasExplosion: true, isDestroying: true, destroyTimer: FPS * DESTRUCTION_DELAY, powerup: pup })
+                return Cell.make({ ...cell, hasExplosion: true, isDestroying: true, destroyTimer: FPS * DESTRUCTION_DELAY, powerup: pup })
             }
-            return Cell.make({ ...cell, hasExplosion: true, powerup: cell.powerup ? null : cell.powerup })
+            // Only destroy exposed powerups in empty cells
+            if (cell.type === "empty" && !cell.isDestroying && cell.powerup) {
+                 return Cell.make({ ...cell, hasExplosion: true, powerup: null })
+            }
+            return Cell.make({ ...cell, hasExplosion: true })
         }
         return Cell.make({ ...cell, hasExplosion: false })
     }))

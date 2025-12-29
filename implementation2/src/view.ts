@@ -6,7 +6,14 @@ import { h } from "cs12251-mvu/src"
 export const view = (model: Model, dispatch: (msg: Msg) => void) => {
     const timeToDisplay = model.state === "warmup" ? model.roundTimer : model.roundTimer
     const seconds = Math.ceil(timeToDisplay / FPS)
-    const timeStr = model.state === "warmup" ? `Start: ${seconds}` : `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`
+
+    // Phase 5: Text display for warmup
+    let timeStr = `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`
+    if (model.state === "warmup") {
+        if (seconds > 2) timeStr = "Ready..."
+        else if (seconds > 1) timeStr = "Set..."
+        else timeStr = "GO!"
+    }
 
     return h("div", {
         style: {
@@ -34,7 +41,8 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
                      style: {
                          backgroundColor: "#000", color: "#fff", padding: "2px 5px",
                          fontFamily: "monospace", fontSize: "20px", fontWeight: "bold",
-                         border: "2px solid #ECECEC"
+                         border: "2px solid #ECECEC",
+                         minWidth: "80px", textAlign: "center"
                      }
                  }, timeStr)
             ]),
@@ -68,7 +76,7 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
             renderBombs(model),
             renderExplosions(model),
             renderPlayers(model),
-            renderBotDebug(model), // Render debug info AFTER players so it's ON TOP
+            renderBotDebug(model),
             renderOverlays(model),
             model.gamePhase === "gameOver" ? renderGameOver(model) : null
         ].flat().filter(Boolean))
@@ -77,15 +85,20 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
 
 const renderOverlays = (model: Model) => {
     if (model.state === "warmup") {
-        const count = Math.ceil(model.roundTimer / FPS)
+        const seconds = Math.ceil(model.roundTimer / FPS)
+        let text = seconds.toString()
+        if (seconds > 2) text = "Ready..."
+        else if (seconds > 1) text = "Set..."
+        else text = "GO!"
+
         return h("div", {
             style: {
                 position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
                 display: "flex", justifyContent: "center", alignItems: "center",
-                backgroundColor: "rgba(0,0,0,0.3)", color: "#FFF", fontSize: "100px", fontWeight: "bold",
+                backgroundColor: "rgba(0,0,0,0.3)", color: "#FFF", fontSize: "80px", fontWeight: "bold",
                 textShadow: "4px 4px #000", zIndex: 100
             }
-        }, count.toString())
+        }, text)
     }
 
     if (model.state === "roundOver" || model.state === "matchOver") {
@@ -262,7 +275,7 @@ const renderBotDebug = (model: Model) => {
                 const pos = p.botPath[i]
                 let cornerStyle: any = {}
 
-                // Set corner based on player ID
+                // Set corner based on player ID (Phase 4b)
                 if (p.id === 2) {
                     // P2: Top-right corner
                     cornerStyle = { top: "2px", right: "2px", left: "auto", bottom: "auto" }
