@@ -211,7 +211,7 @@ const botConfigs: Record<string, any> = {
         powerupPolicy: "first",
         powerupPolicyChance: 1.0
     },
-    extreme: { // Added for Phase 4 Option 4
+    extreme: { // Phase 4 Option 4
         reevaluationInterval: 0.1,
         reevaluationChance: 0.1,
         dangerCheckDistance: 10,
