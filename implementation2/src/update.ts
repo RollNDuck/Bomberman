@@ -25,8 +25,10 @@ export const update = (msg: Msg, model: Model): Model => {
 const handleKeyDown = (key: string, model: Model): Model => {
     if (key === "Escape") {
         if (model.state === "roundOver" || model.state === "matchOver") {
+            // Phase 5: Start next round on Escape, DO NOT toggle debug mode
             return model.state === "matchOver" ? handleRestartGame() : handleStartNextRound(model)
         }
+        // Toggle debug mode only if game is active/warmup
         return { ...model, isDebugMode: !model.isDebugMode }
     }
 
@@ -192,13 +194,11 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
         const timeSinceReeval = (model.currentTime - player.lastReevaluation) / FPS
         let shouldReeval = false
 
-        // 1. Mandatory Triggers (Must re-eval even if in ESCAPE)
         if (explosionEnded) shouldReeval = true
         if (!shouldReeval && newBombPositions.some(pos => manhattanDistance(player.position, pos) <= 5)) {
             shouldReeval = true
         }
 
-        // 2. Periodic Timer (Only if NOT in ESCAPE)
         if (!shouldReeval && player.botState !== "ESCAPE") {
             if (timeSinceReeval >= player.reevaluationInterval && Math.random() < player.reevaluationChance) {
                 shouldReeval = true
@@ -212,9 +212,17 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
         }
         updated = executeBotState(updated, model)
 
+        // BOMB PLANTING FIX: Check if current position already has a bomb
         if (shouldPlantBomb(updated, model) && updated.activeBombs < updated.maxBombs) {
             const bPos = Position.make({ row: Math.round(updated.position.row), col: Math.round(updated.position.col) })
-            if (!newBombs.some(b => Math.round(b.position.row) === bPos.row && Math.round(b.position.col) === bPos.col)) {
+
+            // Explicitly check current position for bomb before planting
+            const bombExists = newBombs.some(b =>
+                Math.round(b.position.row) === bPos.row &&
+                Math.round(b.position.col) === bPos.col
+            )
+
+            if (!bombExists) {
                 newBombs.push(Bomb.make({ position: bPos, plantedAt: model.currentTime, range: updated.bombRange, playerId: updated.id }))
                 updated = { ...updated, activeBombs: updated.activeBombs + 1 }
             }
@@ -228,8 +236,6 @@ const performReevaluation = (player: Player, model: Model): Player => {
     if (isInDanger(player, model)) {
         const safeGoal = findSafeGoal(player, model)
         const path = safeGoal.row !== -1 ? findShortestPath(player.position, safeGoal, model, false) : []
-
-        // CRITICAL: If no safe path (trapped), fallback to WANDER to attempt any move
         if (path.length === 0 && safeGoal.row !== -1) {
              const randomGoal = findRandomGoal(model)
              const randPath = randomGoal.row !== -1 ? findShortestPath(player.position, randomGoal, model, true) : []
@@ -270,7 +276,6 @@ const executeBotState = (player: Player, model: Model): Player => {
     return player
 }
 
-// ==================== GOAL FINDING ====================
 const findSafeGoal = (player: Player, model: Model): Position => {
     const reachable = getReachableCells(player.position, model, false)
     const safeSpots: Position[] = []
@@ -285,7 +290,6 @@ const findSafeGoal = (player: Player, model: Model): Position => {
 }
 
 const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> => {
-    // PHASE 4 FIX: First roll to see if we even care about powerups
     if (Math.random() > player.powerupPolicyChance) {
         return Option.none()
     }
@@ -301,7 +305,6 @@ const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> 
     }
     if (powerups.length === 0) return Option.none()
 
-    // Strict policy check
     if (player.powerupPolicy === "first") {
         let best = powerups[0], minDist = Infinity
         for (const p of powerups) {
@@ -344,8 +347,6 @@ const findRandomGoal = (model: Model): Position => {
     return Position.make({ row: -1, col: -1 })
 }
 
-// ==================== MOVEMENT & PHYSICS ====================
-
 const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): Player => {
     if (!player.isAlive || model.state !== "playing") return player
 
@@ -368,7 +369,6 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
         else if (dCol !== 0 && canMoveTo(nextPos.row, nextPos.col + dCol, player, model)) nextPos = Position.make({ row: nextPos.row, col: nextPos.col + dCol })
 
     } else {
-        // AI MOVEMENT
         if (player.botPath.length > 0) {
             isMoving = true
             const target = player.botPath[0]
@@ -381,16 +381,14 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
             newDirection = newAiDirection as any
 
             if (dist <= player.speed) {
-                // ARRIVED
                 if (canMoveTo(target.row, target.col, player, model)) {
                      nextPos = target
                      newBotPath = player.botPath.slice(1)
                      if (newBotPath.length === 0) isMoving = false
                 } else {
-                    isMoving = false // Blocked by wall/bomb
+                    isMoving = false
                 }
             } else {
-                // MOVE
                 const moveX = (dx / dist) * player.speed
                 const moveY = (dy / dist) * player.speed
                 const nextR = player.position.row + moveY
@@ -399,7 +397,7 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
                 if (canMoveTo(nextR, nextC, player, model)) {
                      nextPos = Position.make({ row: nextR, col: nextC })
                 } else {
-                     isMoving = false // Blocked by wall/bomb
+                     isMoving = false
                 }
             }
         } else {
@@ -440,17 +438,19 @@ const shouldPlantBomb = (player: Player, model: Model): boolean => {
             if (e.id !== player.id && e.isAlive && manhattanDistance(player.position, e.position) <= player.attackPlantDistance) return true
         }
     }
-    // WANDER state planting
+
     if (player.botPath.length > 0) {
         const next = player.botPath[0]
         const r = Math.round(next.row), c = Math.round(next.col)
         if (r >= 0 && r < GRID_ROWS && c >= 0 && c < GRID_COLS) {
             const cell = model.grid[r][c]
-            // PHASE 4 FIX: Must verify current cell doesn't have a bomb
+
+            // FIX: Check if current position has a bomb before planting
             const currentHasBomb = model.bombs.some(b =>
                 Math.round(b.position.row) === Math.round(player.position.row) &&
                 Math.round(b.position.col) === Math.round(player.position.col)
             )
+
             if (cell.type === "soft" && !cell.isDestroying && !currentHasBomb) return true
         }
     }
@@ -573,14 +573,10 @@ const updateBombsAndExplosions = (model: Model): Model => {
                 let pup: any = null
                 if (spawn) {
                     const rnd = Math.random()
-                    // Adjusted spawn rates: 30% each common, 5% each special
                     pup = rnd < 0.3 ? "FireUp" : rnd < 0.6 ? "BombUp" : rnd < 0.9 ? "SpeedUp" : rnd < 0.95 ? "Rainbow" : "Vest"
                 }
-                // PHASE 1C/2C FIX: Remove type: "empty" here. Let destroyTimer handle it.
-                // This keeps cell "soft" during animation, protecting the powerup from immediate deletion.
                 return Cell.make({ ...cell, hasExplosion: true, isDestroying: true, destroyTimer: FPS * DESTRUCTION_DELAY, powerup: pup })
             }
-            // Only destroy exposed powerups in empty cells
             if (cell.type === "empty" && !cell.isDestroying && cell.powerup) {
                  return Cell.make({ ...cell, hasExplosion: true, powerup: null })
             }
@@ -616,10 +612,9 @@ const checkDeaths = (model: Model): Model => {
     })
     const alive = newPlayers.filter(p => p.isAlive)
 
-    // PHASE 2D: One second delay before end
     if (alive.length <= 1 && model.players.length > 1 && model.state === "playing") {
         if (model.deathTimer === null) {
-            return { ...model, players: newPlayers, deathTimer: 30 } // 1 second
+            return { ...model, players: newPlayers, deathTimer: 30 } // 1 second delay
         } else if (model.deathTimer > 0) {
             return { ...model, players: newPlayers, deathTimer: model.deathTimer - 1 }
         } else {

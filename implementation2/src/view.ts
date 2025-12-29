@@ -1,5 +1,5 @@
 import { Array as EffectArray } from "effect"
-import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player } from "./model"
+import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED } from "./model"
 import { Msg } from "./msg"
 import { h } from "cs12251-mvu/src"
 
@@ -177,11 +177,11 @@ const renderGrid = (model: Model) => {
                 }
             } else if (cell.powerup) {
                 let color = "#fff", text = "?"
-                if (cell.powerup === "FireUp") { color = "#FF4500"; text = "櫨"; }
-                if (cell.powerup === "BombUp") { color = "#000"; text = "張"; }
-                if (cell.powerup === "SpeedUp") { color = "#1E90FF"; text = "憎"; }
-                if (cell.powerup === "Rainbow") { color = "#FF00FF"; text = "決"; }
-                if (cell.powerup === "Vest") { color = "#FFFF00"; text = "孱ｸ"; }
+                if (cell.powerup === "FireUp") { color = "#FF4500"; text = "🔥"; }
+                if (cell.powerup === "BombUp") { color = "#000"; text = "💣"; }
+                if (cell.powerup === "SpeedUp") { color = "#1E90FF"; text = "👟"; }
+                if (cell.powerup === "Rainbow") { color = "#FF00FF"; text = "🌈"; }
+                if (cell.powerup === "Vest") { color = "#FFFF00"; text = "🛡️"; }
                 elements.push(h("div", {
                     style: {
                         position: "absolute", left: `${c * CELL_SIZE + 5}px`, top: `${r * CELL_SIZE + 5}px`,
@@ -200,6 +200,11 @@ const renderBombs = (model: Model) => {
     return EffectArray.map(model.bombs, bomb => {
         const frame = Math.floor(model.currentTime / 5) % 2
         const size = frame === 0 ? 30 : 34
+
+        // Check bomb range for color
+        const isPowerful = bomb.range > 1
+        const bombColor = isPowerful ? "#D00" : "#000" // Red for power, black for normal
+
         return h("div", {
             style: {
                 position: "absolute", left: `${Math.floor(bomb.position.col) * CELL_SIZE}px`, top: `${Math.floor(bomb.position.row) * CELL_SIZE}px`,
@@ -207,7 +212,7 @@ const renderBombs = (model: Model) => {
             }
         }, [
             h("div", { style: { position: "relative", width: `${size}px`, height: `${size}px`, transition: "width 0.1s, height 0.1s" } }, [
-                h("div", { style: { width: "100%", height: "100%", backgroundColor: "#000", borderRadius: "50%", border: "2px solid #333", boxShadow: "2px 4px 6px rgba(0,0,0,0.5)", position: "absolute", zIndex: "1" } }, [
+                h("div", { style: { width: "100%", height: "100%", backgroundColor: bombColor, borderRadius: "50%", border: "2px solid #333", boxShadow: "2px 4px 6px rgba(0,0,0,0.5)", position: "absolute", zIndex: "1" } }, [
                      h("div", { style: { position: "absolute", top: "15%", left: "15%", width: "35%", height: "35%", backgroundColor: "#fff", borderRadius: "50%" } })
                 ]),
                 h("div", { style: { position: "absolute", top: "-4px", left: "50%", transform: "translateX(-50%)", width: "10px", height: "6px", backgroundColor: "#FFD700", border: "1px solid #000", borderRadius: "2px", zIndex: "0" } }),
@@ -287,7 +292,7 @@ const renderBotDebug = (model: Model) => {
                 const pos = p.botPath[i]
                 let cornerStyle: any = {}
 
-                // Set corner based on player ID
+                // Set corner based on player ID (Phase 4b)
                 if (p.id === 2) {
                     // P2: Top-right corner
                     cornerStyle = { top: "2px", right: "2px", left: "auto", bottom: "auto" }
@@ -367,6 +372,14 @@ const renderPlayers = (model: Model) => {
         const leftFootTop = animFrame === 0 ? "32px" : "30px"
         const rightFootTop = animFrame === 0 ? "30px" : "32px"
 
+        // === Powerup Emojis ===
+        let statusEmojis = ""
+        if (p.rainbowTimers.FireUp > 0 || p.rainbowTimers.BombUp > 0 || p.rainbowTimers.SpeedUp > 0) statusEmojis += "🌈"
+        if (p.hasVest) statusEmojis += "🛡️"
+        if (p.bombRange > 1) statusEmojis += "🔥"
+        if (p.maxBombs > 1) statusEmojis += "💣"
+        if (p.speed > BASE_SPEED + 0.01) statusEmojis += "👟" // Check > base speed
+
         return h("div", {
             style: {
                 position: "absolute",
@@ -383,13 +396,13 @@ const renderPlayers = (model: Model) => {
                 ...(p.hasVest ? { filter: "drop-shadow(0 0 8px gold)" } : { filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.4))" })
             }
         }, [
-            // Phase 6: Player Label
+            // Phase 6: Player Label + Powerup Emojis
             h("div", {
                 style: {
                     position: "absolute", top: "-20px", fontSize: "14px", fontWeight: "bold", color: "#fff",
-                    textShadow: "1px 1px 2px #000", zIndex: "30"
+                    textShadow: "1px 1px 2px #000", zIndex: "30", whiteSpace: "nowrap"
                 }
-            }, p.label),
+            }, `${p.label} ${statusEmojis}`),
 
             h("div", { style: { width: "6px", height: "6px", backgroundColor: accessoryColor, borderRadius: "50%", border: "1px solid #000", position: "absolute", top: "1px", zIndex: "25", left: isSide ? (isRight ? "10px" : "24px") : "17px" } }),
             h("div", {
