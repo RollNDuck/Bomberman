@@ -1,4 +1,5 @@
 import { Schema as S, Array as EffectArray } from "effect"
+import settings from "./settings"
 
 // Constants
 export const GRID_ROWS = 13
@@ -127,16 +128,6 @@ export const Model = S.Struct({
     gameOverMessage: S.String
 })
 
-// Settings
-const settings = {
-    softBlockSpawnChance: 40,
-    powerupSpawnChance: 30,
-    timerSeconds: 180,
-    humanPlayers: 1,
-    botTypes: ["hostile", "careful", "greedy", "extreme"],
-    roundsToWin: 3
-}
-
 // --- Initialization Helpers ---
 
 export const createGrid = (): Cell[][] => {
@@ -220,7 +211,7 @@ const botConfigs: Record<string, any> = {
         powerupPolicy: "first",
         powerupPolicyChance: 1.0
     },
-    extreme: {
+    extreme: { // Added for Phase 4 Option 4
         reevaluationInterval: 0.1,
         reevaluationChance: 0.1,
         dangerCheckDistance: 10,
@@ -308,7 +299,7 @@ export const initModel = Model.make({
     roundTimer: WARMUP_SECONDS * FPS,
     roundNumber: 1,
     roundWinner: null,
-    roundsToWin: settings.roundsToWin || 3,
+    roundsToWin: settings.roundsToWin,
     isDebugMode: false,
     deathTimer: null,
     gamePhase: "active",

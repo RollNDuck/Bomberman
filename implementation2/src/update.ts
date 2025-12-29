@@ -5,17 +5,9 @@ import {
     FPS, BOMB_TIMER, EXPLOSION_DURATION, BASE_SPEED, SPEED_INCREMENT,
     DESTRUCTION_DELAY, WARMUP_SECONDS, createGrid, initModel
 } from "./model"
+import settings from "./settings"
 
 // ==================== SETTINGS & CONSTANTS ====================
-const settings = {
-    softBlockSpawnChance: 40,
-    powerupSpawnChance: 30,
-    timerSeconds: 180,
-    humanPlayers: 1,
-    botTypes: ["hostile", "careful", "greedy", "extreme"],
-    roundsToWin: 3
-}
-
 const P1_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", bomb: " " }
 const P2_KEYS = { up: "w", down: "s", left: "a", right: "d", bomb: "x" }
 
@@ -119,8 +111,8 @@ const handleTick = (model: Model): Model => {
     const nextTime = model.currentTime + 1
 
     // Update grid timers
-    const nextGrid = EffectArray.map(model.grid, row =>
-        EffectArray.map(row, cell => {
+    const nextGrid = model.grid.map(row =>
+        row.map(cell => {
             if (cell.isDestroying && cell.destroyTimer > 0) {
                 if (cell.destroyTimer === 1) {
                     return Cell.make({
@@ -185,15 +177,15 @@ type PathNode = {
 const findShortestPath = (
     start: Position,
     goal: Position,
-    grid: Cell[][],
+    model: Model, // Pass full model to check bombs
     ignoreSoftBlocks: boolean = false
 ): Position[] => {
     if (goal.row < 0 || goal.row >= GRID_ROWS || goal.col < 0 || goal.col >= GRID_COLS) {
         return []
     }
 
-    const nodes: PathNode[][] = EffectArray.makeBy(GRID_ROWS, (r) =>
-        EffectArray.makeBy(GRID_COLS, (c) => ({
+    const nodes: PathNode[][] = Array.from({ length: GRID_ROWS }, (_, r) =>
+        Array.from({ length: GRID_COLS }, (_, c) => ({
             position: Position.make({ row: r, col: c }),
             distance: Infinity,
             previous: Option.none(),
@@ -201,11 +193,31 @@ const findShortestPath = (
         }))
     )
 
+    // AI Walkability Logic
     const isWalkable = (r: number, c: number): boolean => {
         if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false
-        const cell = grid[r][c]
+
+        // 1. Grid Check
+        const cell = model.grid[r][c]
         if (cell.type === "hard") return false
         if (!ignoreSoftBlocks && cell.type === "soft" && !cell.isDestroying) return false
+
+        // 2. Bomb Check
+        // Bots should treat bombs as walls unless they are standing ON that bomb (escape)
+        const hasBomb = model.bombs.some(b =>
+            Math.round(b.position.row) === r &&
+            Math.round(b.position.col) === c
+        )
+
+        if (hasBomb) {
+            // Allow start node (current position) to be valid even if it has a bomb
+            const sR = Math.round(start.row)
+            const sC = Math.round(start.col)
+            if (r === sR && c === sC) return true
+
+            return false // Blocked by other bombs
+        }
+
         return true
     }
 
@@ -218,6 +230,7 @@ const findShortestPath = (
     let unvisited: PathNode[] = [nodes[sR][sC]]
 
     while (unvisited.length > 0) {
+        // Sort by distance (Simple Dijkstra/BFS)
         unvisited.sort((a, b) => a.distance - b.distance)
         const current = unvisited.shift()!
 
@@ -263,9 +276,6 @@ const reconstructPath = (goalNode: PathNode, nodes: PathNode[][]): Position[] =>
         if (Option.isSome(node.previous)) {
             const prev = node.previous.value
             current = Option.some(nodes[prev.row][prev.col])
-            if (nodes[prev.row][prev.col].distance === 0) {
-                current = Option.none()
-            }
         } else {
             current = Option.none()
         }
@@ -278,19 +288,39 @@ const manhattanDistance = (p1: Position, p2: Position): number => {
            Math.abs(Math.round(p1.col) - Math.round(p2.col))
 }
 
-const isReachable = (start: Position, goal: Position, grid: Cell[][]): boolean => {
-    return findShortestPath(start, goal, grid, true).length > 0
+const isReachable = (start: Position, goal: Position, model: Model): boolean => {
+    return findShortestPath(start, goal, model, false).length > 0 // False = strict reachability
 }
 
 const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
     let newBombs = [...model.bombs]
+
+    // Check triggers
+    const explosionEnded = model.explosions.some(e =>
+        (model.currentTime - e.createdAt) >= (FPS * EXPLOSION_DURATION) - 1
+    )
+
+    const newBombPositions = newBombs
+        .filter(b => b.plantedAt === model.currentTime)
+        .map(b => b.position)
+
     const newPlayers = model.players.map(player => {
         if (!player.isAlive || player.isHuman || !player.botType) return player
 
-        // Check if reevaluation is needed
         const timeSinceReeval = (model.currentTime - player.lastReevaluation) / FPS
-        const shouldReeval = timeSinceReeval >= player.reevaluationInterval &&
+        let shouldReeval = timeSinceReeval >= player.reevaluationInterval &&
                            Math.random() < player.reevaluationChance
+
+        if (explosionEnded) shouldReeval = true
+
+        if (!shouldReeval) {
+            for (const pos of newBombPositions) {
+                if (manhattanDistance(player.position, pos) <= 5) {
+                    shouldReeval = true
+                    break
+                }
+            }
+        }
 
         let updatedPlayer = player
         if (shouldReeval || !player.botState) {
@@ -298,10 +328,10 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
             updatedPlayer = { ...updatedPlayer, lastReevaluation: model.currentTime }
         }
 
-        // Execute bot state
+        // Execute State
         updatedPlayer = executeBotState(updatedPlayer, model)
 
-        // Handle bomb planting
+        // Planting Logic
         if (shouldPlantBomb(updatedPlayer, model) && updatedPlayer.activeBombs < updatedPlayer.maxBombs) {
             const bombPos = Position.make({
                 row: Math.round(updatedPlayer.position.row),
@@ -331,10 +361,10 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
 }
 
 const performReevaluation = (player: Player, model: Model): Player => {
-    // 1. Check for danger
+    // 1. Danger
     if (isInDanger(player, model)) {
         const safeGoal = findSafeGoal(player, model)
-        const path = safeGoal.row !== -1 ? findShortestPath(player.position, safeGoal, model.grid, true) : []
+        const path = safeGoal.row !== -1 ? findShortestPath(player.position, safeGoal, model, true) : []
         return {
             ...player,
             botState: "ESCAPE",
@@ -344,10 +374,10 @@ const performReevaluation = (player: Player, model: Model): Player => {
         }
     }
 
-    // 2. Check for powerups
+    // 2. Powerups
     const powerupGoal = findPowerupGoal(player, model)
     if (Option.isSome(powerupGoal)) {
-        const path = findShortestPath(player.position, powerupGoal.value, model.grid)
+        const path = findShortestPath(player.position, powerupGoal.value, model, false) // Strict path
         return {
             ...player,
             botState: "GET_POWERUP",
@@ -357,11 +387,12 @@ const performReevaluation = (player: Player, model: Model): Player => {
         }
     }
 
-    // 3. Check for attack opportunities
+    // 3. Attack
     const attackGoal = findAttackGoal(player, model)
     if (Option.isSome(attackGoal)) {
-        const ignoreSoft = player.attackPolicy === "first"
-        const path = findShortestPath(player.position, attackGoal.value, model.grid, ignoreSoft)
+        // FIX: "Hostile" bots (Policy 2) should attack aggressively through walls
+        const ignoreSoft = player.attackPolicy === "second"
+        const path = findShortestPath(player.position, attackGoal.value, model, ignoreSoft)
         return {
             ...player,
             botState: "ATTACK",
@@ -371,9 +402,10 @@ const performReevaluation = (player: Player, model: Model): Player => {
         }
     }
 
-    // 4. Wander randomly
+    // 4. Wander
     const randomGoal = findRandomGoal(model)
-    const path = randomGoal.row !== -1 ? findShortestPath(player.position, randomGoal, model.grid) : []
+    // Ignore soft blocks = true allows pathing through them to destroy them
+    const path = randomGoal.row !== -1 ? findShortestPath(player.position, randomGoal, model, true) : []
     return {
         ...player,
         botState: "WANDER",
@@ -387,16 +419,11 @@ const executeBotState = (player: Player, model: Model): Player => {
     if (!player.botType) return player
 
     switch (player.botState) {
-        case "WANDER":
-            return executeWander(player, model)
-        case "ESCAPE":
-            return executeEscape(player, model)
-        case "ATTACK":
-            return executeAttack(player, model)
-        case "GET_POWERUP":
-            return executeGetPowerup(player, model)
-        default:
-            return player
+        case "WANDER": return executeWander(player, model)
+        case "ESCAPE": return executeEscape(player, model)
+        case "ATTACK": return executeAttack(player, model)
+        case "GET_POWERUP": return executeGetPowerup(player, model)
+        default: return player
     }
 }
 
@@ -409,7 +436,6 @@ const executeWander = (player: Player, model: Model): Player => {
         (Math.round(player.position.row) === goalRow && Math.round(player.position.col) === goalCol)) {
         return performReevaluation(player, model)
     }
-
     return followPath(player, model)
 }
 
@@ -423,7 +449,6 @@ const executeEscape = (player: Player, model: Model): Player => {
         isInDanger(player, model)) {
         return performReevaluation(player, model)
     }
-
     return followPath(player, model)
 }
 
@@ -434,21 +459,9 @@ const executeAttack = (player: Player, model: Model): Player => {
     if (goalRow < 0 || goalRow >= GRID_ROWS || goalCol < 0 || goalCol >= GRID_COLS) {
         return performReevaluation(player, model)
     }
-
-    let targetExists = false
-    for (const p of model.players) {
-        if (p.id !== player.id && p.isAlive &&
-            Math.round(p.position.row) === goalRow &&
-            Math.round(p.position.col) === goalCol) {
-            targetExists = true
-            break
-        }
-    }
-
-    if (!targetExists || player.botPath.length === 0) {
+    if (player.botPath.length === 0) {
         return performReevaluation(player, model)
     }
-
     return followPath(player, model)
 }
 
@@ -459,54 +472,76 @@ const executeGetPowerup = (player: Player, model: Model): Player => {
     if (goalRow < 0 || goalRow >= GRID_ROWS || goalCol < 0 || goalCol >= GRID_COLS) {
         return performReevaluation(player, model)
     }
-
-    if (player.botPath.length === 0 || !model.grid[goalRow][goalCol].powerup) {
+    if (!model.grid[goalRow][goalCol].powerup) {
         return performReevaluation(player, model)
     }
-
+    if (player.botPath.length === 0) {
+         return performReevaluation(player, model)
+    }
     return followPath(player, model)
 }
 
 const followPath = (player: Player, model: Model): Player => {
     if (player.botPath.length === 0) return player
 
-    const nextCell = player.botPath[0]
-    const currentRow = Math.round(player.position.row)
-    const currentCol = Math.round(player.position.col)
-    const nextRow = Math.round(nextCell.row)
-    const nextCol = Math.round(nextCell.col)
+    let nextCell = player.botPath[0]
 
-    let aiDirection = player.aiDirection
-    if (nextRow < currentRow) aiDirection = "up"
-    else if (nextRow > currentRow) aiDirection = "down"
-    else if (nextCol < currentCol) aiDirection = "left"
-    else if (nextCol > currentCol) aiDirection = "right"
+    // Check if we are physically AT the next cell (start node or next step)
+    if (Math.round(player.position.row) === Math.round(nextCell.row) &&
+        Math.round(player.position.col) === Math.round(nextCell.col)) {
 
-    let newPath = player.botPath
-    if (Math.abs(player.position.row - nextCell.row) < 0.3 &&
-        Math.abs(player.position.col - nextCell.col) < 0.3) {
-        newPath = player.botPath.slice(1)
+        if (player.botPath.length > 1) {
+             nextCell = player.botPath[1]
+        } else {
+            return player
+        }
+    }
+
+    const currentRow = player.position.row
+    const currentCol = player.position.col
+    const nextRow = nextCell.row
+    const nextCol = nextCell.col
+
+    let aiDirection: "up" | "down" | "left" | "right" | null = null
+
+    // FIX: Floating point comparisons for direction to prevent jitter
+    const epsilon = 0.05
+    if (nextRow < currentRow - epsilon) aiDirection = "up"
+    else if (nextRow > currentRow + epsilon) aiDirection = "down"
+    else if (nextCol < currentCol - epsilon) aiDirection = "left"
+    else if (nextCol > currentCol + epsilon) aiDirection = "right"
+
+    // Snap to center if close enough
+    if (Math.abs(currentRow - nextRow) < 0.2 &&
+        Math.abs(currentCol - nextCol) < 0.2) {
+
+        const newPath = player.botPath.filter(p =>
+            !(Math.round(p.row) === Math.round(nextCell.row) && Math.round(p.col) === Math.round(nextCell.col))
+        )
+        return {
+            ...player,
+            botPath: newPath,
+            aiDirection
+        }
     }
 
     return {
         ...player,
-        botPath: newPath,
         aiDirection
     }
 }
 
 const getDirectionToNextCell = (player: Player, path: Position[]): "up" | "down" | "left" | "right" | null => {
-    if (path.length === 0) return null
-    const nextCell = path[0]
+    if (path.length < 2) return null
+    const nextCell = path[1]
     const currentRow = Math.round(player.position.row)
-    const currentCol = Math.round(player.position.col)
     const nextRow = Math.round(nextCell.row)
     const nextCol = Math.round(nextCell.col)
 
     if (nextRow < currentRow) return "up"
     if (nextRow > currentRow) return "down"
-    if (nextCol < currentCol) return "left"
-    if (nextCol > currentCol) return "right"
+    if (nextCol < Math.round(player.position.col)) return "left"
+    if (nextCol > Math.round(player.position.col)) return "right"
     return null
 }
 
@@ -520,14 +555,16 @@ const shouldPlantBomb = (player: Player, model: Model): boolean => {
         }
     }
 
-    if (player.botState === "WANDER" && player.botPath.length > 0) {
-        const nextCell = player.botPath[0]
+    // Plant if blocked by soft block
+    if (player.botPath.length > 1) {
+        const nextCell = player.botPath[1]
         const row = Math.round(nextCell.row)
         const col = Math.round(nextCell.col)
-        if (row >= 0 && row < GRID_ROWS && col >= 0 && col < GRID_COLS) {
-            const cell = model.grid[row][col]
-            return cell.type === "soft" && !cell.isDestroying
-        }
+             if (row >= 0 && row < GRID_ROWS && col >= 0 && col < GRID_COLS) {
+                const cell = model.grid[row][col]
+                // Plant if blocking soft block
+                if (cell.type === "soft" && !cell.isDestroying) return true
+            }
     }
 
     return false
@@ -537,11 +574,17 @@ const isInDanger = (player: Player, model: Model): boolean => {
     const playerRow = Math.round(player.position.row)
     const playerCol = Math.round(player.position.col)
 
-    for (let dr = -player.dangerCheckDistance; dr <= player.dangerCheckDistance; dr++) {
-        for (let dc = -player.dangerCheckDistance; dc <= player.dangerCheckDistance; dc++) {
-            if (Math.abs(dr) + Math.abs(dc) > player.dangerCheckDistance) continue
+    if (model.grid[playerRow][playerCol].hasExplosion) return true
+
+    const range = player.dangerCheckDistance
+
+    for (let dr = -range; dr <= range; dr++) {
+        for (let dc = -range; dc <= range; dc++) {
+            if (Math.abs(dr) + Math.abs(dc) > range) continue
+
             const checkRow = playerRow + dr
             const checkCol = playerCol + dc
+
             if (checkRow >= 0 && checkRow < GRID_ROWS && checkCol >= 0 && checkCol < GRID_COLS) {
                 if (isCellDangerous(checkRow, checkCol, model, player)) return true
             }
@@ -552,14 +595,8 @@ const isInDanger = (player: Player, model: Model): boolean => {
 }
 
 const isCellDangerous = (row: number, col: number, model: Model, player: Player): boolean => {
-    // Check explosions
-    for (const exp of model.explosions) {
-        for (const pos of exp.cells) {
-            if (Math.round(pos.row) === row && Math.round(pos.col) === col) return true
-        }
-    }
+    if (model.grid[row][col].hasExplosion) return true
 
-    // Check based on detection policy
     if (player.dangerDetectionPolicy === "bombs_only") {
         for (const bomb of model.bombs) {
             if (Math.round(bomb.position.row) === row && Math.round(bomb.position.col) === col) {
@@ -579,35 +616,39 @@ const isCellDangerous = (row: number, col: number, model: Model, player: Player)
     return false
 }
 
-const isInExplosionRange = (row: number, col: number, bombRow: number, bombCol: number, range: number, grid: Cell[][]): boolean => {
-    if (row === bombRow && col > bombCol) {
-        for (let c = bombCol + 1; c <= Math.min(bombCol + range, GRID_COLS - 1); c++) {
-            if (c === col) return true
-            if (grid[row][c].type === "hard") break
-            if (grid[row][c].type === "soft" && !grid[row][c].isDestroying) break
+const isInExplosionRange = (targetRow: number, targetCol: number, bombRow: number, bombCol: number, range: number, grid: Cell[][]): boolean => {
+    if (targetRow === bombRow && targetCol === bombCol) return true
+
+    if (targetRow === bombRow) {
+        const dist = targetCol - bombCol
+        if (Math.abs(dist) <= range) {
+            const step = dist > 0 ? 1 : -1
+            for (let c = bombCol + step; c !== targetCol + step; c += step) {
+                 if (c < 0 || c >= GRID_COLS) return false
+                 if (grid[targetRow][c].type === "hard") return false
+                 if (grid[targetRow][c].type === "soft" && !grid[targetRow][c].isDestroying) {
+                     return c === targetCol
+                 }
+            }
+            return true
         }
     }
-    if (row === bombRow && col < bombCol) {
-        for (let c = bombCol - 1; c >= Math.max(bombCol - range, 0); c--) {
-            if (c === col) return true
-            if (grid[row][c].type === "hard") break
-            if (grid[row][c].type === "soft" && !grid[row][c].isDestroying) break
+
+    if (targetCol === bombCol) {
+        const dist = targetRow - bombRow
+        if (Math.abs(dist) <= range) {
+            const step = dist > 0 ? 1 : -1
+            for (let r = bombRow + step; r !== targetRow + step; r += step) {
+                 if (r < 0 || r >= GRID_ROWS) return false
+                 if (grid[r][targetCol].type === "hard") return false
+                 if (grid[r][targetCol].type === "soft" && !grid[r][targetCol].isDestroying) {
+                     return r === targetRow
+                 }
+            }
+            return true
         }
     }
-    if (col === bombCol && row > bombRow) {
-        for (let r = bombRow + 1; r <= Math.min(bombRow + range, GRID_ROWS - 1); r++) {
-            if (r === row) return true
-            if (grid[r][col].type === "hard") break
-            if (grid[r][col].type === "soft" && !grid[r][col].isDestroying) break
-        }
-    }
-    if (col === bombCol && row < bombRow) {
-        for (let r = bombRow - 1; r >= Math.max(bombRow - range, 0); r--) {
-            if (r === row) return true
-            if (grid[r][col].type === "hard") break
-            if (grid[r][col].type === "soft" && !grid[r][col].isDestroying) break
-        }
-    }
+
     return false
 }
 
@@ -615,9 +656,9 @@ const findSafeGoal = (player: Player, model: Model): Position => {
     const safeSpots: Position[] = []
     for (let r = 0; r < GRID_ROWS; r++) {
         for (let c = 0; c < GRID_COLS; c++) {
-            if (model.grid[r][c].type === "empty" && !isCellDangerous(r, c, model, player)) {
+            if (model.grid[r][c].type !== "hard" && !isCellDangerous(r, c, model, player)) {
                 const goal = Position.make({ row: r, col: c })
-                if (isReachable(player.position, goal, model.grid)) {
+                if (isReachable(player.position, goal, model)) {
                     safeSpots.push(goal)
                 }
             }
@@ -646,7 +687,7 @@ const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> 
         let minDist = Infinity
         for (const p of powerups) {
             const dist = manhattanDistance(player.position, p)
-            if (dist < minDist && isReachable(player.position, p, model.grid)) {
+            if (dist < minDist && isReachable(player.position, p, model)) {
                 minDist = dist
                 best = p
             }
@@ -655,12 +696,12 @@ const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> 
     } else {
         const nearby = powerups.filter(p =>
             manhattanDistance(player.position, p) <= 4 &&
-            isReachable(player.position, p, model.grid) &&
-            Math.random() < player.powerupPolicyChance
+            isReachable(player.position, p, model)
         )
-        return nearby.length > 0
-            ? Option.some(nearby[Math.floor(Math.random() * nearby.length)])
-            : Option.none()
+        if (nearby.length > 0) {
+             return Option.some(nearby[Math.floor(Math.random() * nearby.length)])
+        }
+        return Option.none()
     }
 }
 
@@ -671,7 +712,7 @@ const findAttackGoal = (player: Player, model: Model): Option.Option<Position> =
     if (player.attackPolicy === "first") {
         for (const enemy of enemies) {
             const dist = manhattanDistance(player.position, enemy.position)
-            if (dist <= player.attackTargetDistance && isReachable(player.position, enemy.position, model.grid)) {
+            if (dist <= player.attackTargetDistance && isReachable(player.position, enemy.position, model)) {
                 return Option.some(Position.make({
                     row: Math.round(enemy.position.row),
                     col: Math.round(enemy.position.col)
@@ -730,6 +771,21 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
                 case "left": dCol -= player.speed; newDirection = "left"; isMoving = true; break
                 case "right": dCol += player.speed; newDirection = "right"; isMoving = true; break
             }
+
+            const centeringSpeed = player.speed * 0.5
+            if (player.aiDirection === "up" || player.aiDirection === "down") {
+                const idealCol = Math.round(player.position.col)
+                const diff = idealCol - player.position.col
+                if (Math.abs(diff) > 0.05) {
+                    dCol += Math.sign(diff) * Math.min(Math.abs(diff), centeringSpeed)
+                }
+            } else {
+                const idealRow = Math.round(player.position.row)
+                const diff = idealRow - player.position.row
+                if (Math.abs(diff) > 0.05) {
+                    dRow += Math.sign(diff) * Math.min(Math.abs(diff), centeringSpeed)
+                }
+            }
         }
     }
 
@@ -737,19 +793,13 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
     const newCol = player.position.col + dCol
 
     let nextPos = player.position
-    if (canMoveTo(newRow, newCol, player.position, model)) {
+    if (canMoveTo(newRow, newCol, player, model)) {
         nextPos = Position.make({ row: newRow, col: newCol })
-    } else if (dRow !== 0 && dCol !== 0) {
-        if (canMoveTo(player.position.row + dRow, player.position.col, player.position, model)) {
-            nextPos = Position.make({
-                row: player.position.row + dRow,
-                col: player.position.col
-            })
-        } else if (canMoveTo(player.position.row, player.position.col + dCol, player.position, model)) {
-            nextPos = Position.make({
-                row: player.position.row,
-                col: player.position.col + dCol
-            })
+    } else {
+        if (dRow !== 0 && canMoveTo(player.position.row + dRow, player.position.col, player, model)) {
+            nextPos = Position.make({ row: player.position.row + dRow, col: player.position.col })
+        } else if (dCol !== 0 && canMoveTo(player.position.row, player.position.col + dCol, player, model)) {
+             nextPos = Position.make({ row: player.position.row, col: player.position.col + dCol })
         }
     }
 
@@ -761,50 +811,64 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
     }
 }
 
-const canMoveTo = (row: number, col: number, oldPos: Position, model: Model): boolean => {
-    const size = 0.7
-    const offset = (1 - size) / 2
+// ==================== PROPER BOMB COLLISION LOGIC ====================
+const canMoveTo = (row: number, col: number, player: Player, model: Model): boolean => {
+    // Player bounding box (70% of cell size, centered)
+    const playerWidth = 0.7
+    const playerHeight = 0.7
+    const offsetX = (1 - playerWidth) / 2
+    const offsetY = (1 - playerHeight) / 2
+
+    // 1. Grid/Map Collision (Check corners)
     const corners = [
-        { r: row + offset, c: col + offset },
-        { r: row + offset, c: col + size + offset },
-        { r: row + size + offset, c: col + offset },
-        { r: row + size + offset, c: col + size + offset }
+        { x: col + offsetX, y: row + offsetY },
+        { x: col + offsetX + playerWidth, y: row + offsetY },
+        { x: col + offsetX, y: row + offsetY + playerHeight },
+        { x: col + offsetX + playerWidth, y: row + offsetY + playerHeight }
     ]
 
-    // Where is the player's center currently?
-    const currentCenterR = Math.round(oldPos.row)
-    const currentCenterC = Math.round(oldPos.col)
-
     for (const corner of corners) {
-        const r = Math.floor(corner.r)
-        const c = Math.floor(corner.c)
+        const cellX = Math.floor(corner.x)
+        const cellY = Math.floor(corner.y)
 
-        // 1. Boundary check
-        if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false
-
-        // 2. Hard block check
-        const cell = model.grid[r][c]
+        if (cellY < 0 || cellY >= GRID_ROWS || cellX < 0 || cellX >= GRID_COLS) return false
+        const cell = model.grid[cellY][cellX]
         if (cell.type === "hard") return false
-
-        // 3. Soft block check (if not being destroyed)
         if (cell.type === "soft" && !cell.isDestroying) return false
+    }
 
-        // 4. Bomb check
-        const bomb = model.bombs.find(b => {
-            const bombR = Math.round(b.position.row)
-            const bombC = Math.round(b.position.col)
-            return bombR === r && bombC === c
-        })
+    // 2. Bomb Collision (Explicit Intersection)
+    // Check destination rect vs all bomb rects
+    const destLeft = col + offsetX
+    const destRight = col + offsetX + playerWidth
+    const destTop = row + offsetY
+    const destBottom = row + offsetY + playerHeight
 
-        if (bomb) {
-            // Can we walk through this bomb?
-            // Only if we're currently centered in this cell
-            const isCurrentCell = (r === currentCenterR && c === currentCenterC)
+    const currLeft = player.position.col + offsetX
+    const currRight = player.position.col + offsetX + playerWidth
+    const currTop = player.position.row + offsetY
+    const currBottom = player.position.row + offsetY + playerHeight
 
-            if (!isCurrentCell) {
-                return false // Can't walk into a bomb from another cell
+    for (const bomb of model.bombs) {
+        const bRow = Math.round(bomb.position.row)
+        const bCol = Math.round(bomb.position.col)
+
+        const bLeft = bCol
+        const bRight = bCol + 1
+        const bTop = bRow
+        const bBottom = bRow + 1
+
+        const destIntersects = !(destRight <= bLeft || destLeft >= bRight || destBottom <= bTop || destTop >= bBottom)
+
+        if (destIntersects) {
+            // Check if current position ALSO intersects this specific bomb
+            const currIntersects = !(currRight <= bLeft || currLeft >= bRight || currBottom <= bTop || currTop >= bBottom)
+
+            // If we are NOT currently inside it, we are hitting it from the outside -> Blocked
+            if (!currIntersects) {
+                return false
             }
-            // If we ARE in this cell, we can walk out of it
+            // If we ARE inside it, we are allowed to move (escape)
         }
     }
 
@@ -844,8 +908,8 @@ const updatePlayerTimers = (player: Player): Player => {
         hasActiveRainbow = true
     }
 
-    if (!hasActiveRainbow) {
-        updatedPlayer = {
+    if (!hasActiveRainbow && (timers.FireUp > 0 || timers.BombUp > 0 || timers.SpeedUp > 0)) {
+         updatedPlayer = {
             ...updatedPlayer,
             bombRange: Math.max(1, updatedPlayer.bombRange - 3),
             maxBombs: Math.max(1, updatedPlayer.maxBombs - 3),
@@ -864,13 +928,15 @@ const updatePlayerTimers = (player: Player): Player => {
 }
 
 const checkPowerupCollection = (model: Model): Model => {
-    let newGrid = model.grid
     const newPlayers = model.players.map(player => {
         if (!player.isAlive) return player
 
         const r = Math.round(player.position.row)
         const c = Math.round(player.position.col)
-        const cell = newGrid[r][c]
+
+        if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return player
+
+        const cell = model.grid[r][c]
 
         if (cell.powerup && !cell.isDestroying && cell.type === "empty") {
             let updatedPlayer = player
@@ -888,7 +954,10 @@ const checkPowerupCollection = (model: Model): Model => {
                 case "Rainbow":
                     updatedPlayer = {
                         ...updatedPlayer,
-                        rainbowTimers: { FireUp: 10, BombUp: 10, SpeedUp: 10 }
+                        rainbowTimers: { FireUp: 10, BombUp: 10, SpeedUp: 10 },
+                        bombRange: updatedPlayer.bombRange + 3,
+                        maxBombs: updatedPlayer.maxBombs + 3,
+                        speed: updatedPlayer.speed + SPEED_INCREMENT * 3
                     }
                     break
                 case "Vest":
@@ -896,28 +965,33 @@ const checkPowerupCollection = (model: Model): Model => {
                     break
             }
 
-            // Remove powerup from grid
-            newGrid = EffectArray.map(newGrid, (gridRow, rowIdx) =>
-                rowIdx !== r ? gridRow : EffectArray.map(gridRow, (gridCell, colIdx) =>
-                    colIdx !== c ? gridCell : Cell.make({ ...gridCell, powerup: null })
-                )
-            )
-
             return updatedPlayer
         }
         return player
     })
 
-    return { ...model, grid: newGrid, players: newPlayers }
+    const newGrid = model.grid.map((row, r) =>
+        row.map((cell, c) => {
+             const collected = newPlayers.some(p =>
+                 Math.round(p.position.row) === r &&
+                 Math.round(p.position.col) === c &&
+                 model.grid[r][c].powerup
+             )
+             if (collected && cell.powerup) {
+                 return Cell.make({ ...cell, powerup: null })
+             }
+             return cell
+        })
+    )
+
+    return { ...model, players: newPlayers, grid: newGrid }
 }
 
 const updateBombsAndExplosions = (model: Model): Model => {
-    // Filter active explosions
     const activeExplosions = model.explosions.filter(explosion =>
         (model.currentTime - explosion.createdAt) < FPS * EXPLOSION_DURATION
     )
 
-    // Check which bombs should explode
     const explodingBombIndices: number[] = []
     const newExplosions: Explosion[] = []
 
@@ -930,7 +1004,6 @@ const updateBombsAndExplosions = (model: Model): Model => {
         if (timeElapsed >= BOMB_TIMER || hitByExplosion) {
             explodingBombIndices.push(index)
 
-            // Create explosion
             const cells: Position[] = []
             const center = { r, c }
 
@@ -966,15 +1039,13 @@ const updateBombsAndExplosions = (model: Model): Model => {
         }
     })
 
-    // Combine explosions
     const allExplosions = [...activeExplosions, ...newExplosions]
     const activeExplosionCells = new Set(
         allExplosions.flatMap(e => e.cells.map(p => `${Math.round(p.row)},${Math.round(p.col)}`))
     )
 
-    // Update grid with explosions
-    const newGrid = EffectArray.map(model.grid, (row, r) =>
-        EffectArray.map(row, (cell, c) => {
+    const newGrid = model.grid.map((row, r) =>
+        row.map((cell, c) => {
             const isExplosion = activeExplosionCells.has(`${r},${c}`)
 
             if (isExplosion) {
@@ -1022,10 +1093,8 @@ const updateBombsAndExplosions = (model: Model): Model => {
         })
     )
 
-    // Remove exploded bombs
     const remainingBombs = model.bombs.filter((_, index) => !explodingBombIndices.includes(index))
 
-    // Update player active bomb counts
     const newPlayers = model.players.map(player => {
         const bombsExploded = explodingBombIndices.filter(index =>
             model.bombs[index].playerId === player.id
@@ -1114,29 +1183,37 @@ const handleStartNextRound = (model: Model): Model => {
     return {
         ...model,
         grid: createGrid(),
-        players: initModel.players.map((p, i) => ({
-            ...model.players[i],
-            position: p.startPosition,
-            isAlive: true,
-            activeBombs: 0,
-            speed: BASE_SPEED,
-            bombRange: 1,
-            maxBombs: 1,
-            hasVest: false,
-            vestTimer: 0,
-            rainbowTimers: { FireUp: 0, BombUp: 0, SpeedUp: 0 },
-            direction: "down",
-            isMoving: false,
-            botState: p.botType ? "WANDER" : null,
-            botGoal: Position.make({ row: -1, col: -1 }),
-            botPath: [],
-            lastReevaluation: 0,
-            aiDirection: null
-        })),
+        players: model.players.map((p, i) => {
+            const defaultPlayer = initModel.players[i]
+            return {
+                ...p,
+                position: defaultPlayer.position,
+                startPosition: defaultPlayer.position,
+                isAlive: true,
+                activeBombs: 0,
+                speed: BASE_SPEED,
+                bombRange: 1,
+                maxBombs: 1,
+                hasVest: false,
+                vestTimer: 0,
+                rainbowTimers: { FireUp: 0, BombUp: 0, SpeedUp: 0 },
+                direction: "down",
+                isMoving: false,
+                botState: p.botType ? "WANDER" : null,
+                botGoal: Position.make({ row: -1, col: -1 }),
+                botPath: [],
+                lastReevaluation: 0,
+                aiDirection: null
+            }
+        }),
         bombs: [],
         explosions: [],
         state: "warmup",
         roundTimer: WARMUP_SECONDS * FPS,
-        roundNumber: model.roundNumber + 1
+        roundNumber: model.roundNumber + 1,
+        isDebugMode: false,
+        deathTimer: null,
+        gamePhase: "active",
+        gameOverMessage: ""
     }
 }
