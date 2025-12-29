@@ -7,7 +7,6 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
     const timeToDisplay = model.state === "warmup" ? model.roundTimer : model.roundTimer
     const seconds = Math.ceil(timeToDisplay / FPS)
 
-    // Phase 5: Text display for warmup
     let timeStr = `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`
     if (model.state === "warmup") {
         if (seconds > 2) timeStr = "Ready..."
@@ -106,6 +105,18 @@ const renderOverlays = (model: Model) => {
         const sub = model.roundWinner === "Draw" ? "Draw!" : `${model.roundWinner} Wins!`
         const help = model.state === "matchOver" ? "Champion!" : "Press ESC"
 
+        // PHASE 5: Scoreboard
+        const scoreList = h("div", { style: { display: "flex", gap: "20px", marginTop: "20px" } },
+            model.players.map(p => h("div", {
+                style: { display: "flex", alignItems: "center", fontSize: "24px", color: p.isAlive ? "#fff" : "#aaa" }
+            }, [
+                h("div", {
+                    style: { width: "20px", height: "20px", backgroundColor: p.color, marginRight: "10px", border: "1px solid #fff" }
+                }),
+                `${p.label}: ${p.wins}`
+            ]))
+        )
+
         return h("div", {
             style: {
                 position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
@@ -114,8 +125,9 @@ const renderOverlays = (model: Model) => {
             }
         }, [
             h("h1", { style: { fontSize: "60px", color: "#FFD700", marginBottom: "20px" } }, title),
-            h("h2", { style: { fontSize: "40px", marginBottom: "40px" } }, sub),
-            h("p", { style: { fontSize: "20px" } }, help)
+            h("h2", { style: { fontSize: "40px", marginBottom: "10px" } }, sub),
+            scoreList,
+            h("p", { style: { fontSize: "20px", marginTop: "40px" } }, help)
         ])
     }
     return null
@@ -275,7 +287,7 @@ const renderBotDebug = (model: Model) => {
                 const pos = p.botPath[i]
                 let cornerStyle: any = {}
 
-                // Set corner based on player ID (Phase 4b)
+                // Set corner based on player ID
                 if (p.id === 2) {
                     // P2: Top-right corner
                     cornerStyle = { top: "2px", right: "2px", left: "auto", bottom: "auto" }
@@ -367,9 +379,18 @@ const renderPlayers = (model: Model) => {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.4))",
+                // Phase 5: Aura for Vest (visual indicator)
+                ...(p.hasVest ? { filter: "drop-shadow(0 0 8px gold)" } : { filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.4))" })
             }
         }, [
+            // Phase 6: Player Label
+            h("div", {
+                style: {
+                    position: "absolute", top: "-20px", fontSize: "14px", fontWeight: "bold", color: "#fff",
+                    textShadow: "1px 1px 2px #000", zIndex: "30"
+                }
+            }, p.label),
+
             h("div", { style: { width: "6px", height: "6px", backgroundColor: accessoryColor, borderRadius: "50%", border: "1px solid #000", position: "absolute", top: "1px", zIndex: "25", left: isSide ? (isRight ? "10px" : "24px") : "17px" } }),
             h("div", {
                 style: { width: "22px", height: "20px", backgroundColor: p.color, borderRadius: "6px 6px 8px 8px", border: "2px solid #000", position: "absolute", top: "5px", zIndex: "24", display: "flex", justifyContent: "center", alignItems: "center", transform: isRight && isSide ? "scaleX(-1)" : "none" }

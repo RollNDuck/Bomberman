@@ -190,10 +190,19 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
         if (!player.isAlive || player.isHuman || !player.botType) return player
 
         const timeSinceReeval = (model.currentTime - player.lastReevaluation) / FPS
-        let shouldReeval = timeSinceReeval >= player.reevaluationInterval && Math.random() < player.reevaluationChance
+        let shouldReeval = false
+
+        // 1. Mandatory Triggers (Must re-eval even if in ESCAPE)
         if (explosionEnded) shouldReeval = true
-        if (!shouldReeval) {
-            if (newBombPositions.some(pos => manhattanDistance(player.position, pos) <= 5)) shouldReeval = true
+        if (!shouldReeval && newBombPositions.some(pos => manhattanDistance(player.position, pos) <= 5)) {
+            shouldReeval = true
+        }
+
+        // 2. Periodic Timer (Only if NOT in ESCAPE)
+        if (!shouldReeval && player.botState !== "ESCAPE") {
+            if (timeSinceReeval >= player.reevaluationInterval && Math.random() < player.reevaluationChance) {
+                shouldReeval = true
+            }
         }
 
         let updated = player
@@ -219,7 +228,8 @@ const performReevaluation = (player: Player, model: Model): Player => {
     if (isInDanger(player, model)) {
         const safeGoal = findSafeGoal(player, model)
         const path = safeGoal.row !== -1 ? findShortestPath(player.position, safeGoal, model, false) : []
-        // CRITICAL FIX: If trapped, default to WANDER to try random movement instead of freezing
+
+        // CRITICAL: If no safe path (trapped), fallback to WANDER to attempt any move
         if (path.length === 0 && safeGoal.row !== -1) {
              const randomGoal = findRandomGoal(model)
              const randPath = randomGoal.row !== -1 ? findShortestPath(player.position, randomGoal, model, true) : []
@@ -275,6 +285,11 @@ const findSafeGoal = (player: Player, model: Model): Position => {
 }
 
 const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> => {
+    // PHASE 4 FIX: First roll to see if we even care about powerups
+    if (Math.random() > player.powerupPolicyChance) {
+        return Option.none()
+    }
+
     const reachable = getReachableCells(player.position, model, false)
     const powerups: Position[] = []
     for (let r = 0; r < GRID_ROWS; r++) {
@@ -286,6 +301,7 @@ const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> 
     }
     if (powerups.length === 0) return Option.none()
 
+    // Strict policy check
     if (player.powerupPolicy === "first") {
         let best = powerups[0], minDist = Infinity
         for (const p of powerups) {
@@ -424,12 +440,18 @@ const shouldPlantBomb = (player: Player, model: Model): boolean => {
             if (e.id !== player.id && e.isAlive && manhattanDistance(player.position, e.position) <= player.attackPlantDistance) return true
         }
     }
+    // WANDER state planting
     if (player.botPath.length > 0) {
         const next = player.botPath[0]
         const r = Math.round(next.row), c = Math.round(next.col)
         if (r >= 0 && r < GRID_ROWS && c >= 0 && c < GRID_COLS) {
             const cell = model.grid[r][c]
-            if (cell.type === "soft" && !cell.isDestroying) return true
+            // PHASE 4 FIX: Must verify current cell doesn't have a bomb
+            const currentHasBomb = model.bombs.some(b =>
+                Math.round(b.position.row) === Math.round(player.position.row) &&
+                Math.round(b.position.col) === Math.round(player.position.col)
+            )
+            if (cell.type === "soft" && !cell.isDestroying && !currentHasBomb) return true
         }
     }
     return false
@@ -554,6 +576,8 @@ const updateBombsAndExplosions = (model: Model): Model => {
                     // Adjusted spawn rates: 30% each common, 5% each special
                     pup = rnd < 0.3 ? "FireUp" : rnd < 0.6 ? "BombUp" : rnd < 0.9 ? "SpeedUp" : rnd < 0.95 ? "Rainbow" : "Vest"
                 }
+                // PHASE 1C/2C FIX: Remove type: "empty" here. Let destroyTimer handle it.
+                // This keeps cell "soft" during animation, protecting the powerup from immediate deletion.
                 return Cell.make({ ...cell, hasExplosion: true, isDestroying: true, destroyTimer: FPS * DESTRUCTION_DELAY, powerup: pup })
             }
             // Only destroy exposed powerups in empty cells
@@ -591,16 +615,29 @@ const checkDeaths = (model: Model): Model => {
         return p
     })
     const alive = newPlayers.filter(p => p.isAlive)
+
+    // PHASE 2D: One second delay before end
     if (alive.length <= 1 && model.players.length > 1 && model.state === "playing") {
-        return endRound({ ...model, players: newPlayers }, alive.length === 1 ? alive[0].label : "Draw")
+        if (model.deathTimer === null) {
+            return { ...model, players: newPlayers, deathTimer: 30 } // 1 second
+        } else if (model.deathTimer > 0) {
+            return { ...model, players: newPlayers, deathTimer: model.deathTimer - 1 }
+        } else {
+            return endRound({ ...model, players: newPlayers }, alive.length === 1 ? alive[0].label : "Draw")
+        }
     }
+
+    if (alive.length > 1) {
+        return { ...model, players: newPlayers, deathTimer: null }
+    }
+
     return { ...model, players: newPlayers }
 }
 
 const endRound = (model: Model, winner: string): Model => {
     const newPlayers = model.players.map(p => p.label === winner ? { ...p, wins: p.wins + 1 } : p)
     const matchWinner = newPlayers.find(p => p.wins >= model.roundsToWin)
-    return { ...model, players: newPlayers, state: matchWinner ? "matchOver" : "roundOver", roundWinner: winner, gamePhase: "gameOver", gameOverMessage: matchWinner ? `${winner} WINS MATCH!` : `${winner} WINS ROUND!` }
+    return { ...model, players: newPlayers, state: matchWinner ? "matchOver" : "roundOver", roundWinner: winner, gamePhase: "gameOver", gameOverMessage: matchWinner ? `${winner} WINS MATCH!` : `${winner} WINS ROUND!`, deathTimer: null }
 }
 
 const handleRestartGame = (): Model => ({ ...initModel, grid: createGrid(), state: "warmup" })
