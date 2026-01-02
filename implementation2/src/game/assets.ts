@@ -1,20 +1,18 @@
-// This file acts as a central registry for asset paths.
-// In a real bundler environment (Vite/Webpack), you would likely import these directly.
+// src/game/assets.ts
 
-export const ASSETS = {
-    img: {
-        p1_sheet: "/src/assets/img/p1_sheet.png",
-        p2_sheet: "/src/assets/img/p2_sheet.png",
-        p3_sheet: "/src/assets/img/p3_sheet.png",
-        p4_sheet: "/src/assets/img/p4_sheet.png",
-        bomb_sheet: "/src/assets/img/bomb_sheet.png",
-        explosion_sheet: "/src/assets/img/explosion_sheet.png",
-        tiles: "/src/assets/img/tiles.png",
-        powerups: "/src/assets/img/powerups.png"
-    },
-    sfx: {
-        explode: "/src/assets/sfx/explode.mp3",
-        death: "/src/assets/sfx/death.mp3",
-        powerup: "/src/assets/sfx/powerup.mp3"
-    }
+// 1. IMAGES
+export const IMAGES = {
+    FLOOR: new URL('../assets/img/floor.png', import.meta.url).href,
+    HARD_BLOCK: new URL('../assets/img/hard_block.png', import.meta.url).href,
+    SOFT_BLOCK: new URL('../assets/img/soft_block_sheet.png', import.meta.url).href,
+    BOMB: new URL('../assets/img/bomb.png', import.meta.url).href,
+    PLAYERS: new URL('../assets/img/bombermen.png', import.meta.url).href,
+    POWERUPS: new URL('../assets/img/powerup.gif', import.meta.url).href,
+}
+
+// 2. SOUNDS
+export const SOUNDS = {
+    EXPLODE: new URL('../assets/sfx/explode.wav', import.meta.url).href,
+    POWERUP: new URL('../assets/sfx/powerup.wav', import.meta.url).href,
+    DEATH: new URL('../assets/sfx/death.mp3', import.meta.url).href,
 }

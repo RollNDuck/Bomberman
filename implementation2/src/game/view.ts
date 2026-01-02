@@ -1,6 +1,6 @@
 import { Array as EffectArray } from "effect"
 import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED } from "./model"
-import { Msg } from "./msg"
+import { Msg } from "./game/msg"
 import { h } from "cs12251-mvu/src"
 
 export const view = (model: Model, dispatch: (msg: Msg) => void) => {

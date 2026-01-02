@@ -6,6 +6,7 @@ import {
     DESTRUCTION_DELAY, WARMUP_SECONDS, createGrid, initModel
 } from "./model"
 import settings from "./settings"
+import { audioManager } from "./audio" // Phase 6: Audio Manager
 
 const P1_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", bomb: " " }
 const P2_KEYS = { up: "w", down: "s", left: "a", right: "d", bomb: "x" }
@@ -646,12 +647,20 @@ const updatePlayerTimers = (p: Player): Player => {
 }
 
 const checkPowerupCollection = (model: Model): Model => {
+    let sfxPlayed = false;
+
     const newPlayers = EffectArray.map(model.players, p => {
         if (!p.isAlive) return p
         const r = Math.round(p.position.row), c = Math.round(p.position.col)
         if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return p
         const cell = model.grid[r][c]
         if (cell.powerup && !cell.isDestroying && cell.type === "empty") {
+            // AUDIO: Powerup
+            if (!sfxPlayed) {
+                audioManager.playSFX("POWERUP");
+                sfxPlayed = true;
+            }
+
             let u = p
             if (cell.powerup === "FireUp") u = { ...u, bombRange: u.bombRange + 1 }
             else if (cell.powerup === "BombUp") u = { ...u, maxBombs: u.maxBombs + 1 }
@@ -677,11 +686,14 @@ const updateBombsAndExplosions = (model: Model): Model => {
 
     let explodedIndices: number[] = []
     let newExps: Explosion[] = []
+    let explosionOccurred = false;
 
     EffectArray.forEach(model.bombs, (b, i) => {
         const r = Math.round(b.position.row), c = Math.round(b.position.col)
         if ((model.currentTime - b.plantedAt)/FPS >= BOMB_TIMER || model.grid[r][c].hasExplosion) {
             explodedIndices = [...explodedIndices, i]
+            explosionOccurred = true;
+
             let cells = [Position.make({ row: r, col: c })]
             for (const d of [{r:0,c:1}, {r:0,c:-1}, {r:1,c:0}, {r:-1,c:0}]) {
                 for (let k = 1; k <= b.range; k++) {
@@ -696,6 +708,11 @@ const updateBombsAndExplosions = (model: Model): Model => {
             newExps = [...newExps, Explosion.make({ cells, createdAt: model.currentTime })]
         }
     })
+
+    // AUDIO: Explode
+    if (explosionOccurred) {
+        audioManager.playSFX("EXPLODE");
+    }
 
     const allExps = [...activeExps, ...newExps]
 
@@ -740,6 +757,7 @@ const updateBombsAndExplosions = (model: Model): Model => {
 }
 
 const checkDeaths = (model: Model): Model => {
+    let deathOccurred = false;
     const newPlayers = EffectArray.map(model.players, p => {
         if (!p.isAlive) return p
         const r = p.position.row, c = p.position.col
@@ -752,10 +770,16 @@ const checkDeaths = (model: Model): Model => {
         )
         if (hit) {
             if (p.hasVest) return { ...p, hasVest: false, vestTimer: 0 }
+            deathOccurred = true;
             return { ...p, isAlive: false }
         }
         return p
     })
+
+    // AUDIO: Death
+    if (deathOccurred) {
+        audioManager.playSFX("DEATH");
+    }
 
     const alive = EffectArray.filter(newPlayers, p => p.isAlive)
 
