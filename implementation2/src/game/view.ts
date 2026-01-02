@@ -1,6 +1,6 @@
 import { Array as EffectArray } from "effect"
-import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED } from "./model"
-import { Msg } from "./game/msg"
+import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED, EXPLOSION_DURATION } from "./model"
+import { Msg } from "./msg"
 import { h } from "cs12251-mvu/src"
 
 export const view = (model: Model, dispatch: (msg: Msg) => void) => {
@@ -105,7 +105,7 @@ const renderOverlays = (model: Model) => {
         const sub = model.roundWinner === "Draw" ? "Draw!" : `${model.roundWinner} Wins!`
         const help = model.state === "matchOver" ? "Champion!" : "Press ESC"
 
-        // PHASE 5: Scoreboard
+        // Scoreboard
         const scoreList = h("div", { style: { display: "flex", gap: "20px", marginTop: "20px" } },
             model.players.map(p => h("div", {
                 style: { display: "flex", alignItems: "center", fontSize: "24px", color: p.isAlive ? "#fff" : "#aaa" }
@@ -156,9 +156,31 @@ const renderGrid = (model: Model) => {
                 ]))
             } else if (cell.type === "soft") {
                 if (cell.isDestroying) {
-                    style.backgroundColor = "#FF4500"; style.border = "2px solid #FFFF00"; style.boxShadow = "inset 0 0 10px #FFFF00"
+                    // --- IMPROVED CRUMBLING ANIMATION ---
+                    // Calculate breakdown stage based on timer
+                    const maxTime = FPS * 1.1; // 1.1s
+                    const progress = 1 - (cell.destroyTimer / maxTime); // 0.0 (start) -> 1.0 (gone)
+
+                    // We step the visual damage into 4 phases
+                    const damagePhase = Math.floor(progress * 4);
+
+                    style.backgroundColor = "#FF4500";
+                    style.border = "2px solid #FFFF00";
+                    style.overflow = "hidden"; // Clip inner debris
+
+                    // Create "debris" that shrinks
+                    const sizePercent = 100 - (damagePhase * 25); // 100%, 75%, 50%, 25%
+
                     elements.push(h("div", { style }, [
-                         h("div", { style: { width: "100%", height: "100%", backgroundColor: "rgba(255, 255, 0, 0.5)" } })
+                         h("div", {
+                             style: {
+                                 width: `${sizePercent}%`,
+                                 height: `${sizePercent}%`,
+                                 backgroundColor: "rgba(80, 40, 0, 0.8)", // Brownish debris
+                                 margin: `${(100 - sizePercent) / 2}%`, // Center it
+                                 transition: "all 0.1s"
+                             }
+                         })
                     ]))
                 } else {
                     style.backgroundColor = "#202020"; style.display = "flex"; style.flexDirection = "column"; style.boxSizing = "border-box"
@@ -182,12 +204,20 @@ const renderGrid = (model: Model) => {
                 if (cell.powerup === "SpeedUp") { color = "#1E90FF"; text = "👟"; }
                 if (cell.powerup === "Rainbow") { color = "#FF00FF"; text = "🌈"; }
                 if (cell.powerup === "Vest") { color = "#FFFF00"; text = "🛡️"; }
+
+                // --- IMPROVED POWERUP ANIMATION ---
+                // Bobbing effect using Sine wave on currentTime
+                const bob = Math.sin(model.currentTime / 5) * 4; // +/- 4px movement
+
                 elements.push(h("div", {
                     style: {
-                        position: "absolute", left: `${c * CELL_SIZE + 5}px`, top: `${r * CELL_SIZE + 5}px`,
+                        position: "absolute",
+                        left: `${c * CELL_SIZE + 5}px`,
+                        top: `${r * CELL_SIZE + 5 + bob}px`, // Animated Top
                         width: `${CELL_SIZE - 10}px`, height: `${CELL_SIZE - 10}px`, backgroundColor: "#fff",
                         border: `2px solid ${color}`, borderRadius: "5px", display: "flex", justifyContent: "center",
-                        alignItems: "center", fontSize: "20px", zIndex: "2", boxShadow: "0 2px 5px rgba(0,0,0,0.3)"
+                        alignItems: "center", fontSize: "20px", zIndex: "2",
+                        boxShadow: "0 4px 5px rgba(0,0,0,0.5)" // stronger shadow for floating effect
                     }
                 }, text))
             }
@@ -198,12 +228,12 @@ const renderGrid = (model: Model) => {
 
 const renderBombs = (model: Model) => {
     return EffectArray.map(model.bombs, bomb => {
+        // Pulse logic
         const frame = Math.floor(model.currentTime / 5) % 2
         const size = frame === 0 ? 30 : 34
 
-        // Check bomb range for color
         const isPowerful = bomb.range > 1
-        const bombColor = isPowerful ? "#D00" : "#000" // Red for power, black for normal
+        const bombColor = isPowerful ? "#D00" : "#000"
 
         return h("div", {
             style: {
@@ -224,15 +254,57 @@ const renderBombs = (model: Model) => {
 
 const renderExplosions = (model: Model) => {
     const elements = []
+
+    // Group explosions to calculate lifetime
     for (const exp of model.explosions) {
+        // --- IMPROVED EXPLOSION ANIMATION ---
+        // Calculate age
+        const age = model.currentTime - exp.createdAt;
+        const maxAge = FPS * 1; // 30 ticks
+        const lifeLeft = 1 - (age / maxAge); // 1.0 -> 0.0
+
+        // Expansion then Contraction
+        // 0.0 -> 0.2: Rapid Expand
+        // 0.2 -> 0.8: Hold/Pulse
+        // 0.8 -> 1.0: Rapid Shrink
+        let scale = 1.0;
+        if (lifeLeft > 0.8) scale = (1.0 - lifeLeft) * 5; // Expand
+        else if (lifeLeft < 0.2) scale = lifeLeft * 5; // Shrink
+
+        const opacity = Math.min(1, lifeLeft * 2);
+
         for (const pos of exp.cells) {
             elements.push(h("div", {
                 style: {
                     position: "absolute", left: `${Math.floor(pos.col) * CELL_SIZE}px`, top: `${Math.floor(pos.row) * CELL_SIZE}px`,
-                    width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`, backgroundColor: "#FFFF00", border: "4px solid #FF4500",
-                    zIndex: "15", display: "flex", justifyContent: "center", alignItems: "center", boxShadow: "0 0 15px #FF4500", boxSizing: "border-box"
+                    width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`,
+                    zIndex: "15", display: "flex", justifyContent: "center", alignItems: "center",
+                    pointerEvents: "none"
                 }
-            }, [ h("div", { style: { width: "60%", height: "60%", backgroundColor: "#FFF", borderRadius: "50%" } }) ]))
+            }, [
+                h("div", {
+                    style: {
+                        width: "100%", height: "100%",
+                        backgroundColor: "#FFFF00",
+                        border: "4px solid #FF4500",
+                        borderRadius: "15%", // Slightly rounded
+                        boxShadow: "0 0 15px #FF4500",
+                        boxSizing: "border-box",
+                        transform: `scale(${scale})`, // Animated Scale
+                        opacity: opacity.toString(),
+                        transition: "transform 0.05s"
+                    }
+                }, [
+                    h("div", {
+                        style: {
+                            width: "60%", height: "60%",
+                            backgroundColor: "#FFF",
+                            borderRadius: "50%",
+                            margin: "20%"
+                        }
+                    })
+                ])
+            ]))
         }
     }
     return elements

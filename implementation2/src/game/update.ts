@@ -6,7 +6,7 @@ import {
     DESTRUCTION_DELAY, WARMUP_SECONDS, createGrid, initModel
 } from "./model"
 import settings from "./settings"
-import { audioManager } from "./audio" // Phase 6: Audio Manager
+import { audioManager } from "./audio" // Phase 6: Import Audio Manager
 
 const P1_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", bomb: " " }
 const P2_KEYS = { up: "w", down: "s", left: "a", right: "d", bomb: "x" }
@@ -655,7 +655,7 @@ const checkPowerupCollection = (model: Model): Model => {
         if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return p
         const cell = model.grid[r][c]
         if (cell.powerup && !cell.isDestroying && cell.type === "empty") {
-            // AUDIO: Powerup
+            // Audio Trigger
             if (!sfxPlayed) {
                 audioManager.playSFX("POWERUP");
                 sfxPlayed = true;
@@ -709,7 +709,7 @@ const updateBombsAndExplosions = (model: Model): Model => {
         }
     })
 
-    // AUDIO: Explode
+    // Audio Trigger
     if (explosionOccurred) {
         audioManager.playSFX("EXPLODE");
     }
@@ -776,7 +776,7 @@ const checkDeaths = (model: Model): Model => {
         return p
     })
 
-    // AUDIO: Death
+    // Audio Trigger
     if (deathOccurred) {
         audioManager.playSFX("DEATH");
     }
