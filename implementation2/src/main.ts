@@ -1,7 +1,7 @@
 import { startSimple } from "cs12251-mvu/src"
-import { initModel } from "./model"
-import { view } from "./view"
-import { update } from "./update"
+import { initModel } from "./game/model"
+import { view } from "./game/view"
+import { update } from "./game/update"
 
 const root = document.getElementById("app")!
 
