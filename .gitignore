@@ -1,9 +1,24 @@
-# implementation2/node_modules/
-# implementation2/package-lock.json
-# implementation2/package.json
+# --- Dependencies ---
+# This matches 'implementation2/node_modules', 'implementation1/node_modules', etc.
+node_modules/
 
-implementation2/references.txt/
+# --- Build Outputs ---
+dist/
+build/
+.parcel-cache/
+.vite/
 
+# --- Logs & System Files ---
+*.log
+.DS_Store
+Thumbs.db
+
+# --- Editors ---
+.vscode/
+.idea/
+
+# --- Optional: Scratch Folders ---
+# If you want to ignore the 'scratch' folder inside implementation2:
 scratch/
-implementation1/
 
+references/
