@@ -1,7 +1,5 @@
-// src/game/view.ts
-
 import { Array as EffectArray } from "effect"
-import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED } from "./model"
+import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED, EXPLOSION_DURATION, Bomb, Explosion } from "./model"
 import { Msg } from "./msg"
 import { h } from "cs12251-mvu/src"
 import { IMAGES } from "./assets"
@@ -72,7 +70,7 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
                 height: `${GRID_ROWS * CELL_SIZE}px`,
                 backgroundColor: "#388700",
                 border: "none",
-                backgroundImage: `url(${IMAGES.FLOOR})`,
+                backgroundImage: `url("${IMAGES.FLOOR}")`,
                 backgroundRepeat: "repeat",
                 backgroundSize: `${CELL_SIZE}px`,
                 imageRendering: "pixelated"
@@ -154,7 +152,7 @@ const renderGrid = (model: Model) => {
                     top: `${r * CELL_SIZE}px`,
                     width: `${CELL_SIZE}px`,
                     height: `${CELL_SIZE}px`,
-                    backgroundImage: `url(${IMAGES.FLOOR})`,
+                    backgroundImage: `url("${IMAGES.FLOOR}")`,
                     backgroundSize: "cover",
                     zIndex: "0",
                     imageRendering: "pixelated"
@@ -170,14 +168,14 @@ const renderGrid = (model: Model) => {
                         top: `${r * CELL_SIZE}px`,
                         width: `${CELL_SIZE}px`,
                         height: `${CELL_SIZE}px`,
-                        backgroundImage: `url(${IMAGES.HARD_BLOCK})`,
+                        backgroundImage: `url("${IMAGES.HARD_BLOCK}")`,
                         backgroundSize: "cover",
                         zIndex: "1",
                         imageRendering: "pixelated"
                     }
                 }))
             } else if (cell.type === "soft") {
-                // Soft block with destruction animation
+                // Soft block
                 let opacity = 1;
                 let frameIndex = 0;
 
@@ -185,7 +183,6 @@ const renderGrid = (model: Model) => {
                     const maxTime = FPS * 1.1;
                     const progress = 1 - (cell.destroyTimer / maxTime);
                     opacity = 1 - progress;
-                    // Use progress to determine which destruction frame to show (0-8)
                     frameIndex = Math.min(Math.floor(progress * 9), 8);
                 }
 
@@ -196,12 +193,12 @@ const renderGrid = (model: Model) => {
                         top: `${r * CELL_SIZE}px`,
                         width: `${CELL_SIZE}px`,
                         height: `${CELL_SIZE}px`,
-                        backgroundImage: `url(${IMAGES.SOFT_BLOCK_FRAMES[frameIndex]})`,
+                        backgroundImage: `url("${IMAGES.SOFT_BLOCK_FRAMES[frameIndex]}")`,
                         backgroundSize: "cover",
                         zIndex: "1",
                         opacity: opacity,
                         imageRendering: "pixelated",
-                        transition: "opacity 0.1s"
+                        transition: opacity > 0.1 ? "opacity 0.1s" : "none"
                     }
                 }))
             } else if (cell.powerup) {
@@ -221,16 +218,17 @@ const renderGrid = (model: Model) => {
                         powerupFrames = IMAGES.POWERUPS.SPEED_UP;
                         break;
                     case "Rainbow":
-                        // Cycle through all power-up types
+                        // Rainbow cycles through different powerups
                         const rainbowIndex = Math.floor(model.currentTime / 10) % 3;
                         powerupFrames = [
-                            IMAGES.POWERUPS.FIRE_UP[rainbowIndex % 3],
-                            IMAGES.POWERUPS.BOMB_UP[rainbowIndex % 3],
-                            IMAGES.POWERUPS.SPEED_UP[rainbowIndex % 3]
+                            IMAGES.POWERUPS.FIRE_UP[rainbowIndex % IMAGES.POWERUPS.FIRE_UP.length],
+                            IMAGES.POWERUPS.BOMB_UP[rainbowIndex % IMAGES.POWERUPS.BOMB_UP.length],
+                            IMAGES.POWERUPS.SPEED_UP[rainbowIndex % IMAGES.POWERUPS.SPEED_UP.length]
                         ];
                         filter = "hue-rotate(180deg)";
                         break;
                     case "Vest":
+                        // Use bomb up image with gold tint for vest
                         powerupFrames = IMAGES.POWERUPS.BOMB_UP;
                         filter = "hue-rotate(60deg) brightness(1.5)";
                         break;
@@ -247,7 +245,7 @@ const renderGrid = (model: Model) => {
                             top: `${r * CELL_SIZE + bob}px`,
                             width: `${CELL_SIZE}px`,
                             height: `${CELL_SIZE}px`,
-                            backgroundImage: `url(${currentFrame})`,
+                            backgroundImage: `url("${currentFrame}")`,
                             backgroundSize: "contain",
                             backgroundRepeat: "no-repeat",
                             backgroundPosition: "center",
@@ -265,26 +263,19 @@ const renderGrid = (model: Model) => {
 
 const renderBombs = (model: Model) => {
     return EffectArray.map(model.bombs, bomb => {
-        // Animated bomb - cycle through 3 frames
         const frameIndex = Math.floor(model.currentTime / 10) % IMAGES.BOMB_FRAMES.length;
         const bombImage = IMAGES.BOMB_FRAMES[frameIndex];
-        const pulse = Math.sin(model.currentTime / 5) * 2;
 
         return h("div", {
             style: {
-                position: "absolute",
-                left: `${Math.floor(bomb.position.col) * CELL_SIZE}px`,
-                top: `${Math.floor(bomb.position.row) * CELL_SIZE + pulse}px`,
-                width: `${CELL_SIZE}px`,
-                height: `${CELL_SIZE}px`,
-                zIndex: "10",
-                backgroundImage: `url(${bombImage})`,
+                position: "absolute", left: `${Math.floor(bomb.position.col) * CELL_SIZE}px`, top: `${Math.floor(bomb.position.row) * CELL_SIZE}px`,
+                width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`, zIndex: "10", display: "flex", justifyContent: "center", alignItems: "center",
+                backgroundImage: `url("${bombImage}")`,
                 backgroundSize: "contain",
                 backgroundRepeat: "no-repeat",
                 backgroundPosition: "center",
                 imageRendering: "pixelated",
-                filter: bomb.range > 1 ? "hue-rotate(180deg) saturate(1.5)" : "none",
-                transition: "top 0.1s"
+                filter: bomb.range > 1 ? "hue-rotate(180deg) saturate(1.5)" : "none"
             }
         })
     })
@@ -295,18 +286,18 @@ const renderExplosions = (model: Model) => {
 
     for (const exp of model.explosions) {
         const age = model.currentTime - exp.createdAt;
-        const maxAge = FPS * 1; // 1 second explosion
+        const maxAge = FPS * 1; // 1 second explosion duration
         const lifeLeft = 1 - (age / maxAge);
 
-        // Determine explosion frame (4 frames total)
-        const frameCount = 4;
+        // 7 frames instead of 4
+        const frameCount = 7;
         const frameIndex = Math.min(Math.floor((1 - lifeLeft) * frameCount), frameCount - 1);
         const opacity = Math.min(1, lifeLeft * 1.5);
 
-        // Simplified: use center explosion for all cells
-        // You could enhance this to use different explosion types based on position
-        const explosionImage = IMAGES.EXPLOSION.CENTER[frameIndex];
+        // Use the simple explosion array with 7 frames
+        const explosionImage = IMAGES.EXPLOSION[frameIndex];
 
+        // If explosions have chain cells, render them all with the same sprite
         for (const pos of exp.cells) {
             elements.push(h("div", {
                 style: {
@@ -316,15 +307,18 @@ const renderExplosions = (model: Model) => {
                     width: `${CELL_SIZE}px`,
                     height: `${CELL_SIZE}px`,
                     zIndex: "15",
-                    backgroundImage: `url(${explosionImage})`,
-                    backgroundSize: "cover",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    backgroundImage: `url("${explosionImage}")`,
+                    backgroundSize: "contain",
                     backgroundRepeat: "no-repeat",
                     backgroundPosition: "center",
                     opacity: opacity,
                     imageRendering: "pixelated",
                     pointerEvents: "none"
                 }
-            }))
+            }));
         }
     }
     return elements
@@ -337,7 +331,6 @@ const renderBotDebug = (model: Model) => {
     for (const p of model.players) {
         if (p.isHuman || !p.isAlive) continue
 
-        // Draw danger radius circle
         if (p.dangerCheckDistance > 0) {
             const radius = p.dangerCheckDistance * CELL_SIZE
             debugElements.push(h("div", {
@@ -440,56 +433,49 @@ const renderBotDebug = (model: Model) => {
 
 const renderPlayers = (model: Model) => {
     return EffectArray.map(model.players, p => {
+        // SELECT ASSETS BASED ON PLAYER ID
+        const playerKey = `P${p.id}` as keyof typeof IMAGES.PLAYERS;
+        const playerAssets = IMAGES.PLAYERS[playerKey];
+        const assets = playerAssets || IMAGES.PLAYERS.P1;
+
         if (!p.isAlive) {
-            // Death animation
             const deathTime = p.deathTime || model.currentTime;
             const deathAge = model.currentTime - deathTime;
-            const deathDuration = FPS * 2; // 2 seconds death animation
+            const deathDuration = FPS * 2;
             const deathProgress = Math.min(deathAge / deathDuration, 1);
-
-            // Use progress to determine death frame (0-6)
             const deathFrameIndex = Math.min(Math.floor(deathProgress * 7), 6);
-            const deathImage = IMAGES.PLAYERS.P1.DEATH[deathFrameIndex];
+
+            const deathImage = assets.DEATH[deathFrameIndex];
 
             return h("div", {
                 style: {
-                    position: "absolute",
-                    left: `${p.position.col * CELL_SIZE}px`,
-                    top: `${p.position.row * CELL_SIZE}px`,
-                    width: `${CELL_SIZE}px`,
-                    height: `${CELL_SIZE}px`,
-                    zIndex: "20",
-                    backgroundImage: `url(${deathImage})`,
-                    backgroundSize: "contain",
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "center",
+                    position: "absolute", left: `${p.position.col * CELL_SIZE}px`, top: `${p.position.row * CELL_SIZE}px`,
+                    width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`, zIndex: "20",
+                    backgroundImage: `url("${deathImage}")`,
+                    backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center",
                     imageRendering: "pixelated",
-                    filter: `hue-rotate(${(p.id - 1) * 90}deg)`
                 }
             })
         }
 
-        // Determine player animation based on movement
         let playerImage: string;
-        const walkCycle = Math.floor(model.currentTime / 8) % 2; // 0 or 1
+        const walkCycle = Math.floor(model.currentTime / 8) % 2;
 
         if (p.isMoving) {
-            // Walking animation - alternate between left and right foot
-            if (walkCycle === 0) {
-                // Left foot forward
-                playerImage = IMAGES.PLAYERS.P1.WALK_LEFT[p.direction];
-            } else {
-                // Right foot forward
-                playerImage = IMAGES.PLAYERS.P1.WALK_RIGHT[p.direction];
+            const dir = p.direction === "up" ? "up" : p.direction;
+            // @ts-ignore
+            playerImage = assets.WALK_LEFT[dir] || assets.WALK_LEFT.down; // Fallback
+            if (walkCycle !== 0) {
+                 // @ts-ignore
+                playerImage = assets.WALK_RIGHT[dir] || assets.WALK_RIGHT.down;
             }
         } else {
-            // Standing pose
-            playerImage = IMAGES.PLAYERS.P1.STAND[p.direction];
+            // @ts-ignore
+            playerImage = assets.STAND[p.direction === "up" ? "up" : p.direction] || assets.STAND.down;
         }
 
-        // Status emojis for power-ups
         let statusEmojis = ""
-        if (p.rainbowTimers.FireUp > 0 || p.rainbowTimers.BombUp > 0 || p.rainbowTimers.SpeedUp > 0) statusEmojis += "🌈"
+        if (p.rainbowTimers?.FireUp > 0 || p.rainbowTimers?.BombUp > 0 || p.rainbowTimers?.SpeedUp > 0) statusEmojis += "🌈"
         if (p.hasVest) statusEmojis += "🛡️"
         if (p.bombRange > 1) statusEmojis += "🔥"
         if (p.maxBombs > 1) statusEmojis += "💣"
@@ -506,36 +492,25 @@ const renderPlayers = (model: Model) => {
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                justifyContent: "center"
+                justifyContent: "center",
+                ...(p.hasVest ? { filter: "drop-shadow(0 0 8px gold)" } : {})
             }
         }, [
             h("div", {
                 style: {
-                    position: "absolute",
-                    top: "-20px",
-                    fontSize: "14px",
-                    fontWeight: "bold",
-                    color: "#fff",
-                    textShadow: "1px 1px 2px #000",
-                    zIndex: "30",
-                    whiteSpace: "nowrap",
-                    backgroundColor: "rgba(0,0,0,0.5)",
-                    padding: "2px 5px",
-                    borderRadius: "3px"
+                    position: "absolute", top: "-20px", fontSize: "14px", fontWeight: "bold", color: "#fff",
+                    textShadow: "1px 1px 2px #000", zIndex: "30", whiteSpace: "nowrap",
+                    backgroundColor: "rgba(0,0,0,0.5)", padding: "2px 5px", borderRadius: "3px"
                 }
             }, `${p.label} ${statusEmojis}`),
 
             h("div", {
                 style: {
-                    width: `${CELL_SIZE}px`,
-                    height: `${CELL_SIZE}px`,
-                    backgroundImage: `url(${playerImage})`,
-                    backgroundSize: "contain",
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "center",
+                    width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`,
+                    backgroundImage: `url("${playerImage}")`,
+                    backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center",
                     imageRendering: "pixelated",
-                    filter: `hue-rotate(${(p.id - 1) * 90}deg)`, // Color shift for different players
-                    ...(p.hasVest ? { filter: `hue-rotate(${(p.id - 1) * 90}deg) drop-shadow(0 0 8px gold)` } : {})
+                    ...(p.hasVest ? { filter: `drop-shadow(0 0 8px gold)` } : {})
                 }
             })
         ])
