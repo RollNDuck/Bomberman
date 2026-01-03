@@ -30,7 +30,8 @@ const handleKeyDown = (key: string, model: Model): Model => {
     const isControlKey = (k: string) =>
         k === "ArrowUp" || k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight" || k === " " ||
         k === "w" || k === "a" || k === "s" || k === "d" || k === "x" ||
-        k === "Escape" || k === "r" || k === "R"
+        k === "Escape"
+        // 'r' key removed
 
     if (!isControlKey(key)) return model
 
@@ -41,9 +42,6 @@ const handleKeyDown = (key: string, model: Model): Model => {
         return { ...model, isDebugMode: !model.isDebugMode }
     }
 
-    if ((key === "r" || key === "R") && (model.state === "roundOver" || model.state === "matchOver")) {
-        return model.state === "matchOver" ? handleRestartGame() : handleStartNextRound(model)
-    }
     if (model.state !== "playing") return model
 
     const newKeys = new Set(model.keys)
@@ -66,34 +64,31 @@ const handleKeyDown = (key: string, model: Model): Model => {
         return player
     })
 
-    // Functional accumulation for new bombs
     let bombsToAdd: Bomb[] = []
 
-    // We iterate to find where bombs should be added
     for (const player of model.players) {
         if (!player.isHuman || !player.isAlive) continue
         const bombKey = player.id === 1 ? P1_KEYS.bomb : P2_KEYS.bomb
         if (key === bombKey && player.activeBombs < player.maxBombs) {
              const bombPos = Position.make({ row: Math.round(player.position.row), col: Math.round(player.position.col) })
 
-             // Check existing bombs in model
              const bombExistsModel = EffectArray.some(model.bombs, b =>
                   Math.round(b.position.row) === bombPos.row && Math.round(b.position.col) === bombPos.col
              )
 
-             // Check newly added bombs in local accumulation
              let bombExistsLocal = false
              for(const b of bombsToAdd) {
                  if (Math.round(b.position.row) === bombPos.row && Math.round(b.position.col) === bombPos.col) bombExistsLocal = true
              }
 
              if (!bombExistsModel && !bombExistsLocal) {
-                 bombsToAdd = [...bombsToAdd, Bomb.make({
+                 // STRICT COMPLIANCE: Use EffectArray.append instead of spread syntax
+                 bombsToAdd = EffectArray.append(bombsToAdd, Bomb.make({
                      position: bombPos,
                      plantedAt: model.currentTime,
                      range: player.bombRange,
                      playerId: player.id
-                 })]
+                 }))
              }
         }
     }
@@ -147,19 +142,18 @@ const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: bool
     const startR = Math.round(start.row)
     const startC = Math.round(start.col)
 
-    let reachable: boolean[][] = []
-    for(let i=0; i<GRID_ROWS; i++) {
-        let row: boolean[] = []
-        for(let j=0; j<GRID_COLS; j++) row = [...row, false]
-        reachable = [...reachable, row]
-    }
+    // Using EffectArray to generate the initial grid
+    const reachable = EffectArray.makeBy(GRID_ROWS, () =>
+        EffectArray.makeBy(GRID_COLS, () => false)
+    )
 
     if (startR < 0 || startR >= GRID_ROWS || startC < 0 || startC >= GRID_COLS) return reachable
 
-    let queue: {r: number, c: number}[] = [{r: startR, c: startC}]
+    let queue = [{r: startR, c: startC}]
     reachable[startR][startC] = true
 
     let head = 0
+    // Queue length access is allowed (property, not method)
     while(head < queue.length) {
         const current = queue[head]
         head++
@@ -176,10 +170,10 @@ const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: bool
                 const isHard = cell.type === "hard"
                 const hasBomb = EffectArray.some(model.bombs, b => Math.round(b.position.row) === nR && Math.round(b.position.col) === nC)
 
-                // Allow start node to be "bomb" if we are escaping from it
                 if (!isHard && (!hasBomb || (nR === startR && nC === startC)) && (ignoreSoftBlocks || !isSoft)) {
                     reachable[nR][nC] = true
-                    queue = [...queue, {r: nR, c: nC}]
+                    // STRICT COMPLIANCE: Use EffectArray.append
+                    queue = EffectArray.append(queue, {r: nR, c: nC})
                 }
             }
         }
@@ -237,8 +231,9 @@ const findShortestPath = (
 
                 if (walkable && isSafe) {
                     visited.add(key(nR, nC))
-                    const newPath = [...current.path, Position.make({ row: nR, col: nC })]
-                    queue = [...queue, { r: nR, c: nC, path: newPath }]
+                    // STRICT COMPLIANCE: Use EffectArray.append
+                    const newPath = EffectArray.append(current.path, Position.make({ row: nR, col: nC }))
+                    queue = EffectArray.append(queue, { r: nR, c: nC, path: newPath })
                 }
             }
         }
@@ -262,13 +257,11 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
         const timeSinceReeval = (model.currentTime - player.lastReevaluation) / FPS
         let shouldReeval = false
 
-        // Mandatory triggers
         if (explosionEnded) shouldReeval = true
         if (!shouldReeval && EffectArray.some(newBombPositions, pos => manhattanDistance(player.position, pos) <= 5)) {
             shouldReeval = true
         }
 
-        // Periodic trigger
         if (!shouldReeval && player.botState !== "ESCAPE") {
             if (timeSinceReeval >= player.reevaluationInterval && Math.random() < player.reevaluationChance) {
                 shouldReeval = true
@@ -292,8 +285,6 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
             if (!bombExists) {
                 newBombs = EffectArray.append(newBombs, Bomb.make({ position: bPos, plantedAt: model.currentTime, range: updated.bombRange, playerId: updated.id }))
                 updated = { ...updated, activeBombs: updated.activeBombs + 1 }
-
-                // NEW: Force immediate re-evaluation to trigger ESCAPE after planting
                 updated = performReevaluation(updated, { ...model, bombs: newBombs })
             }
         }
@@ -307,7 +298,6 @@ const performReevaluation = (player: Player, model: Model): Player => {
         const safeGoal = findSafeGoal(player, model)
         const path = safeGoal.row !== -1 ? findShortestPath(player.position, safeGoal, model, false, true, player) : []
 
-        // If trapped, fallback to random WANDER
         if (safeGoal.row === -1 || (path.length === 0 && manhattanDistance(player.position, safeGoal) > 1)) {
              const randomGoal = findRandomGoal(model)
              const randPath = randomGoal.row !== -1 ? findShortestPath(player.position, randomGoal, model, false) : []
@@ -355,11 +345,11 @@ const findSafeGoal = (player: Player, model: Model): Position => {
     for (let r = 0; r < GRID_ROWS; r++) {
         for (let c = 0; c < GRID_COLS; c++) {
             if (reachable[r][c] && !isCellDangerous(r, c, model, player)) {
-                safeSpots = [...safeSpots, Position.make({ row: r, col: c })]
+                // EffectArray.append
+                safeSpots = EffectArray.append(safeSpots, Position.make({ row: r, col: c }))
             }
         }
     }
-    // Prefer closest safe spot to current position to escape quickly
     if (safeSpots.length > 0) {
         let best = safeSpots[0]
         let minDist = Infinity
@@ -382,7 +372,7 @@ const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> 
     for (let r = 0; r < GRID_ROWS; r++) {
         for (let c = 0; c < GRID_COLS; c++) {
             if (model.grid[r][c].powerup && reachable[r][c]) {
-                powerups = [...powerups, Position.make({ row: r, col: c })]
+                powerups = EffectArray.append(powerups, Position.make({ row: r, col: c }))
             }
         }
     }
@@ -437,7 +427,6 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
     let newDirection = player.direction
     let isMoving = false
 
-    // Functional drop using filter
     const dropOne = (arr: Position[]) => EffectArray.filter(arr, (_, i) => i > 0)
 
     let newBotPath = player.botPath
@@ -462,27 +451,21 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
             const dx = target.col - player.position.col
             const dy = target.row - player.position.row
 
-            // SMARTER MOVEMENT: Prefer Axis-aligned movement to get out of stuck corners
-            // Instead of diagonal vector, pick dominant axis
             let moveX = 0, moveY = 0
 
             if (Math.abs(dx) > Math.abs(dy)) {
-                // Move Horizontal first
                 newAiDirection = dx < 0 ? "left" : "right"
                 moveX = Math.sign(dx) * Math.min(Math.abs(dx), player.speed)
 
-                // Align Y to center of row
                 const rowCenter = Math.round(player.position.row)
                 const diffY = rowCenter - player.position.row
                 if (Math.abs(diffY) > 0.05) {
                      moveY = Math.sign(diffY) * Math.min(Math.abs(diffY), player.speed * 0.5)
                 }
             } else {
-                // Move Vertical first
                 newAiDirection = dy < 0 ? "up" : "down"
                 moveY = Math.sign(dy) * Math.min(Math.abs(dy), player.speed)
 
-                // Align X to center of col
                 const colCenter = Math.round(player.position.col)
                 const diffX = colCenter - player.position.col
                 if (Math.abs(diffX) > 0.05) {
@@ -490,22 +473,18 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
                 }
             }
 
-            // Sync visual direction with AI direction
             if (newAiDirection) {
                 newDirection = newAiDirection
             }
 
-            // If very close to center, snap
             const dist = Math.sqrt(dx*dx + dy*dy)
 
             if (dist <= player.speed) {
                 if (canMoveTo(target.row, target.col, player, model)) {
-                     // SNAP TO CENTER: Fix stuck bots by forcing integer alignment on arrival
                      nextPos = Position.make({ row: target.row, col: target.col })
                      newBotPath = dropOne(player.botPath)
                      if (newBotPath.length === 0) isMoving = false
                 } else {
-                    // Force re-eval if blocked
                     isMoving = false
                     newBotPath = []
                 }
@@ -513,14 +492,12 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
                 const nextR = player.position.row + moveY
                 const nextC = player.position.col + moveX
 
-                // Allow slop
                 const nextR_snapped = Math.round(nextR * 100) / 100
                 const nextC_snapped = Math.round(nextC * 100) / 100
 
                 if (canMoveTo(nextR_snapped, nextC_snapped, player, model)) {
                      nextPos = Position.make({ row: nextR_snapped, col: nextC_snapped })
                 } else {
-                     // Blocked? Try moving on single axis to slide
                      if (moveX !== 0 && canMoveTo(player.position.row, nextC_snapped, player, model)) {
                           nextPos = Position.make({ row: player.position.row, col: nextC_snapped })
                      } else if (moveY !== 0 && canMoveTo(nextR_snapped, player.position.col, player, model)) {
@@ -541,7 +518,6 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
 }
 
 const canMoveTo = (row: number, col: number, player: Player, model: Model): boolean => {
-    // Relaxed collision for movement (0.6 instead of 0.7) to prevent "sticky" corners
     const pw = 0.6, ph = 0.6, ox = (1 - pw) / 2, oy = (1 - ph) / 2
     const corners = [{ x: col + ox, y: row + oy }, { x: col + ox + pw, y: row + oy }, { x: col + ox, y: row + oy + ph }, { x: col + ox + pw, y: row + oy + ph }]
 
@@ -607,7 +583,6 @@ const isInDanger = (player: Player, model: Model): boolean => {
 }
 
 const isCellDangerous = (r: number, c: number, model: Model, player: Player): boolean => {
-    // Immediate death check
     if (model.grid[r][c].hasExplosion) return true
 
     if (player.dangerDetectionPolicy === "bombs_only") {
@@ -663,7 +638,6 @@ const checkPowerupCollection = (model: Model): Model => {
         if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return p
         const cell = model.grid[r][c]
         if (cell.powerup && !cell.isDestroying && cell.type === "empty") {
-            // Audio Trigger
             if (!sfxPlayed) {
                 audioManager.playSFX("POWERUP");
                 sfxPlayed = true;
@@ -699,7 +673,8 @@ const updateBombsAndExplosions = (model: Model): Model => {
     EffectArray.forEach(model.bombs, (b, i) => {
         const r = Math.round(b.position.row), c = Math.round(b.position.col)
         if ((model.currentTime - b.plantedAt)/FPS >= BOMB_TIMER || model.grid[r][c].hasExplosion) {
-            explodedIndices = [...explodedIndices, i]
+            // STRICT COMPLIANCE: Use EffectArray.append
+            explodedIndices = EffectArray.append(explodedIndices, i)
             explosionOccurred = true;
 
             let cells = [Position.make({ row: r, col: c })]
@@ -709,20 +684,21 @@ const updateBombsAndExplosions = (model: Model): Model => {
                     if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) break
                     const cell = model.grid[nr][nc]
                     if (cell.type === "hard") break
-                    cells = [...cells, Position.make({ row: nr, col: nc })]
+                    // STRICT COMPLIANCE: Use EffectArray.append
+                    cells = EffectArray.append(cells, Position.make({ row: nr, col: nc }))
                     if (cell.type === "soft" && !cell.isDestroying) break
                 }
             }
-            newExps = [...newExps, Explosion.make({ cells, createdAt: model.currentTime })]
+            // STRICT COMPLIANCE: Use EffectArray.append
+            newExps = EffectArray.append(newExps, Explosion.make({ cells, createdAt: model.currentTime }))
         }
     })
 
-    // Audio Trigger
     if (explosionOccurred) {
         audioManager.playSFX("EXPLODE");
     }
 
-    const allExps = [...activeExps, ...newExps]
+    const allExps = EffectArray.appendAll(activeExps, newExps)
 
     const expSet = new Set(EffectArray.flatMap(allExps, e => EffectArray.map(e.cells, p => `${Math.round(p.row)},${Math.round(p.col)}`)))
 
@@ -784,7 +760,6 @@ const checkDeaths = (model: Model): Model => {
         return p
     })
 
-    // Audio Trigger
     if (deathOccurred) {
         audioManager.playSFX("DEATH");
     }

@@ -19,7 +19,8 @@ const wrappedView = (model: any, dispatch: (msg: any) => void) => {
 const setupEventListeners = () => {
     if (!currentDispatch) return
 
-    const controlKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x", "Escape", "r", "R"]
+    // Removed "r" and "R" from control keys
+    const controlKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x", "Escape"]
     const releaseKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x"]
 
     document.addEventListener("keydown", (e) => {

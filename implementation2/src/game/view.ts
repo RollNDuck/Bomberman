@@ -1,5 +1,5 @@
 import { Array as EffectArray } from "effect"
-import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED, EXPLOSION_DURATION } from "./model"
+import { Model, GRID_ROWS, GRID_COLS, CELL_SIZE, FPS, Player, BASE_SPEED, EXPLOSION_DURATION, Bomb, Explosion } from "./model"
 import { Msg } from "./msg"
 import { h } from "cs12251-mvu/src"
 
@@ -12,6 +12,33 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
         if (seconds > 2) timeStr = "Ready..."
         else if (seconds > 1) timeStr = "Set..."
         else timeStr = "GO!"
+    }
+
+    // Build the game board layers
+    const gridLayer = renderGrid(model)
+    const bombsLayer = renderBombs(model)
+    const explosionsLayer = renderExplosions(model)
+    const playersLayer = renderPlayers(model)
+    const debugLayer = renderBotDebug(model)
+
+    // Combine layers using EffectArray functions
+    // We flatten the array of arrays into a single array of VNodes
+    let gameBoardChildren = EffectArray.flatten([
+        gridLayer,
+        bombsLayer,
+        explosionsLayer,
+        playersLayer,
+        debugLayer
+    ])
+
+    // Add overlays if they exist
+    const overlay = renderOverlays(model)
+    if (overlay) {
+        gameBoardChildren = EffectArray.append(gameBoardChildren, overlay)
+    }
+
+    if (model.gamePhase === "gameOver") {
+        gameBoardChildren = EffectArray.append(gameBoardChildren, renderGameOver(model))
     }
 
     return h("div", {
@@ -70,15 +97,7 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
                 backgroundColor: "#388700",
                 border: "none",
             }
-        }, [
-            renderGrid(model),
-            renderBombs(model),
-            renderExplosions(model),
-            renderPlayers(model),
-            renderBotDebug(model),
-            renderOverlays(model),
-            model.gamePhase === "gameOver" ? renderGameOver(model) : null
-        ].flat().filter(Boolean))
+        }, gameBoardChildren)
     ])
 }
 
@@ -106,7 +125,6 @@ const renderOverlays = (model: Model) => {
         const help = model.state === "matchOver" ? "Champion!" : "Press ESC"
 
         // Scoreboard
-        // Fix: Use EffectArray.map instead of native map
         const scoreList = h("div", { style: { display: "flex", gap: "20px", marginTop: "20px" } },
             EffectArray.map(model.players, p => h("div", {
                 style: { display: "flex", alignItems: "center", fontSize: "24px", color: p.isAlive ? "#fff" : "#aaa" }
@@ -135,12 +153,10 @@ const renderOverlays = (model: Model) => {
 }
 
 const renderGrid = (model: Model) => {
-    const elements = []
-    const highlight = "#E0E0E0"
-    const shadow = "#707070"
-
-    for (let r = 0; r < GRID_ROWS; r++) {
-        for (let c = 0; c < GRID_COLS; c++) {
+    // We use flatMap to map rows and columns to single VNode elements, resulting in a single flat array
+    // This strictly avoids native array methods
+    return EffectArray.flatMap(EffectArray.range(0, GRID_ROWS - 1), r =>
+        EffectArray.flatMap(EffectArray.range(0, GRID_COLS - 1), c => {
             const cell = model.grid[r][c]
             let style: any = {
                 position: "absolute", left: `${c * CELL_SIZE}px`, top: `${r * CELL_SIZE}px`,
@@ -149,54 +165,49 @@ const renderGrid = (model: Model) => {
 
             if (cell.type === "hard") {
                 style.backgroundColor = "#B0B0B0"
-                style.borderTop = `4px solid ${highlight}`; style.borderLeft = `4px solid ${highlight}`
-                style.borderRight = `4px solid ${shadow}`; style.borderBottom = `4px solid ${shadow}`
+                style.borderTop = `4px solid #E0E0E0`; style.borderLeft = `4px solid #E0E0E0`
+                style.borderRight = `4px solid #707070`; style.borderBottom = `4px solid #707070`
                 style.boxSizing = "border-box"
-                elements.push(h("div", { style }, [
+                return [h("div", { style }, [
                     h("div", { style: { width: "100%", height: "100%", border: "2px solid #999", boxSizing: "border-box" } })
-                ]))
+                ])]
             } else if (cell.type === "soft") {
                 if (cell.isDestroying) {
-                    // --- IMPROVED CRUMBLING ANIMATION ---
-                    // Calculate breakdown stage based on timer
-                    const maxTime = FPS * 1.1; // 1.1s
-                    const progress = 1 - (cell.destroyTimer / maxTime); // 0.0 (start) -> 1.0 (gone)
-
-                    // We step the visual damage into 4 phases
+                    const maxTime = FPS * 1.1;
+                    const progress = 1 - (cell.destroyTimer / maxTime);
                     const damagePhase = Math.floor(progress * 4);
 
                     style.backgroundColor = "#FF4500";
                     style.border = "2px solid #FFFF00";
-                    style.overflow = "hidden"; // Clip inner debris
+                    style.overflow = "hidden";
 
-                    // Create "debris" that shrinks
-                    const sizePercent = 100 - (damagePhase * 25); // 100%, 75%, 50%, 25%
+                    const sizePercent = 100 - (damagePhase * 25);
 
-                    elements.push(h("div", { style }, [
+                    return [h("div", { style }, [
                          h("div", {
                              style: {
                                  width: `${sizePercent}%`,
                                  height: `${sizePercent}%`,
-                                 backgroundColor: "rgba(80, 40, 0, 0.8)", // Brownish debris
-                                 margin: `${(100 - sizePercent) / 2}%`, // Center it
+                                 backgroundColor: "rgba(80, 40, 0, 0.8)",
+                                 margin: `${(100 - sizePercent) / 2}%`,
                                  transition: "all 0.1s"
                              }
                          })
-                    ]))
+                    ])]
                 } else {
                     style.backgroundColor = "#202020"; style.display = "flex"; style.flexDirection = "column"; style.boxSizing = "border-box"
                     const brick = (w: string, mr: boolean = false) => h("div", {
                         style: {
                             width: w, height: "100%", backgroundColor: "#9AA2AB",
-                            borderTop: `2px solid ${highlight}`, borderLeft: `2px solid ${highlight}`,
-                            borderBottom: `2px solid ${shadow}`, borderRight: mr ? "2px solid #202020" : `2px solid ${shadow}`, boxSizing: "border-box"
+                            borderTop: `2px solid #E0E0E0`, borderLeft: `2px solid #E0E0E0`,
+                            borderBottom: `2px solid #707070`, borderRight: mr ? "2px solid #202020" : `2px solid #707070`, boxSizing: "border-box"
                         }
                     })
-                    elements.push(h("div", { style }, [
+                    return [h("div", { style }, [
                         h("div", { style: { width: "100%", height: "13px", display: "flex" } }, [ brick("100%") ]),
                         h("div", { style: { width: "100%", height: "13px", display: "flex" } }, [ brick("33.33%", true), brick("66.67%") ]),
                         h("div", { style: { width: "100%", height: "14px", display: "flex" } }, [ brick("50%", true), brick("50%") ])
-                    ]))
+                    ])]
                 }
             } else if (cell.powerup) {
                 let color = "#fff", text = "?"
@@ -206,33 +217,29 @@ const renderGrid = (model: Model) => {
                 if (cell.powerup === "Rainbow") { color = "#FF00FF"; text = "🌈"; }
                 if (cell.powerup === "Vest") { color = "#FFFF00"; text = "🛡️"; }
 
-                // --- IMPROVED POWERUP ANIMATION ---
-                // Bobbing effect using Sine wave on currentTime
-                const bob = Math.sin(model.currentTime / 5) * 4; // +/- 4px movement
+                const bob = Math.sin(model.currentTime / 5) * 4;
 
-                elements.push(h("div", {
+                return [h("div", {
                     style: {
                         position: "absolute",
                         left: `${c * CELL_SIZE + 5}px`,
-                        top: `${r * CELL_SIZE + 5 + bob}px`, // Animated Top
+                        top: `${r * CELL_SIZE + 5 + bob}px`,
                         width: `${CELL_SIZE - 10}px`, height: `${CELL_SIZE - 10}px`, backgroundColor: "#fff",
                         border: `2px solid ${color}`, borderRadius: "5px", display: "flex", justifyContent: "center",
                         alignItems: "center", fontSize: "20px", zIndex: "2",
-                        boxShadow: "0 4px 5px rgba(0,0,0,0.5)" // stronger shadow for floating effect
+                        boxShadow: "0 4px 5px rgba(0,0,0,0.5)"
                     }
-                }, text))
+                }, text)]
             }
-        }
-    }
-    return elements
+            return []
+        })
+    )
 }
 
 const renderBombs = (model: Model) => {
     return EffectArray.map(model.bombs, bomb => {
-        // Pulse logic
         const frame = Math.floor(model.currentTime / 5) % 2
         const size = frame === 0 ? 30 : 34
-
         const isPowerful = bomb.range > 1
         const bombColor = isPowerful ? "#D00" : "#000"
 
@@ -254,28 +261,19 @@ const renderBombs = (model: Model) => {
 }
 
 const renderExplosions = (model: Model) => {
-    const elements = []
-
-    // Group explosions to calculate lifetime
-    for (const exp of model.explosions) {
-        // --- IMPROVED EXPLOSION ANIMATION ---
-        // Calculate age
+    return EffectArray.flatMap(model.explosions, exp => {
         const age = model.currentTime - exp.createdAt;
-        const maxAge = FPS * 1; // 30 ticks
-        const lifeLeft = 1 - (age / maxAge); // 1.0 -> 0.0
+        const maxAge = FPS * 1;
+        const lifeLeft = 1 - (age / maxAge);
 
-        // Expansion then Contraction
-        // 0.0 -> 0.2: Rapid Expand
-        // 0.2 -> 0.8: Hold/Pulse
-        // 0.8 -> 1.0: Rapid Shrink
         let scale = 1.0;
-        if (lifeLeft > 0.8) scale = (1.0 - lifeLeft) * 5; // Expand
-        else if (lifeLeft < 0.2) scale = lifeLeft * 5; // Shrink
+        if (lifeLeft > 0.8) scale = (1.0 - lifeLeft) * 5;
+        else if (lifeLeft < 0.2) scale = lifeLeft * 5;
 
         const opacity = Math.min(1, lifeLeft * 2);
 
-        for (const pos of exp.cells) {
-            elements.push(h("div", {
+        return EffectArray.map(exp.cells, pos =>
+            h("div", {
                 style: {
                     position: "absolute", left: `${Math.floor(pos.col) * CELL_SIZE}px`, top: `${Math.floor(pos.row) * CELL_SIZE}px`,
                     width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`,
@@ -288,10 +286,10 @@ const renderExplosions = (model: Model) => {
                         width: "100%", height: "100%",
                         backgroundColor: "#FFFF00",
                         border: "4px solid #FF4500",
-                        borderRadius: "15%", // Slightly rounded
+                        borderRadius: "15%",
                         boxShadow: "0 0 15px #FF4500",
                         boxSizing: "border-box",
-                        transform: `scale(${scale})`, // Animated Scale
+                        transform: `scale(${scale})`,
                         opacity: opacity.toString(),
                         transition: "transform 0.05s"
                     }
@@ -305,23 +303,23 @@ const renderExplosions = (model: Model) => {
                         }
                     })
                 ])
-            ]))
-        }
-    }
-    return elements
+            ])
+        )
+    })
 }
 
 const renderBotDebug = (model: Model) => {
     if (!model.isDebugMode) return []
 
-    const debugElements: any[] = []
-    for (const p of model.players) {
-        if (p.isHuman || !p.isAlive) continue
+    return EffectArray.flatMap(model.players, p => {
+        if (p.isHuman || !p.isAlive) return []
+
+        let elements: any[] = []
 
         // Draw danger radius circle
         if (p.dangerCheckDistance > 0) {
             const radius = p.dangerCheckDistance * CELL_SIZE
-            debugElements.push(h("div", {
+            elements = EffectArray.append(elements, h("div", {
                 style: {
                     position: "absolute",
                     left: `${(p.position.col * CELL_SIZE) + (CELL_SIZE / 2) - radius}px`,
@@ -330,7 +328,7 @@ const renderBotDebug = (model: Model) => {
                     height: `${radius * 2}px`,
                     border: "2px dashed rgba(255, 0, 0, 0.5)",
                     borderRadius: "50%",
-                    zIndex: "40", // High z-index to stay on top
+                    zIndex: "40",
                     pointerEvents: "none"
                 }
             }))
@@ -340,7 +338,7 @@ const renderBotDebug = (model: Model) => {
         const botTypeText = p.botType ? p.botType : "human"
         const botStateText = p.botState ? p.botState : "none"
 
-        debugElements.push(h("div", {
+        elements = EffectArray.append(elements, h("div", {
             style: {
                 position: "absolute",
                 left: `${p.position.col * CELL_SIZE}px`,
@@ -361,26 +359,14 @@ const renderBotDebug = (model: Model) => {
 
         // Draw path if exists
         if (p.botPath && p.botPath.length > 0) {
-            for (let i = 0; i < p.botPath.length; i++) {
-                const pos = p.botPath[i]
+             const pathElements = EffectArray.map(p.botPath, pos => {
                 let cornerStyle: any = {}
+                if (p.id === 2) cornerStyle = { top: "2px", right: "2px", left: "auto", bottom: "auto" }
+                else if (p.id === 3) cornerStyle = { bottom: "2px", left: "2px", top: "auto", right: "auto" }
+                else if (p.id === 4) cornerStyle = { bottom: "2px", right: "2px", top: "auto", left: "auto" }
+                else cornerStyle = { top: "2px", left: "2px", right: "auto", bottom: "auto" }
 
-                // Set corner based on player ID (Phase 4b)
-                if (p.id === 2) {
-                    // P2: Top-right corner
-                    cornerStyle = { top: "2px", right: "2px", left: "auto", bottom: "auto" }
-                } else if (p.id === 3) {
-                    // P3: Bottom-left corner
-                    cornerStyle = { bottom: "2px", left: "2px", top: "auto", right: "auto" }
-                } else if (p.id === 4) {
-                    // P4: Bottom-right corner
-                    cornerStyle = { bottom: "2px", right: "2px", top: "auto", left: "auto" }
-                } else {
-                    // P1 or other: Top-left corner (default)
-                    cornerStyle = { top: "2px", left: "2px", right: "auto", bottom: "auto" }
-                }
-
-                debugElements.push(h("div", {
+                return h("div", {
                     style: {
                         position: "absolute",
                         left: `${pos.col * CELL_SIZE}px`,
@@ -401,13 +387,14 @@ const renderBotDebug = (model: Model) => {
                             ...cornerStyle
                         }
                     })
-                ]))
-            }
+                ])
+             })
+             elements = EffectArray.appendAll(elements, pathElements)
         }
 
         // Draw goal indicator
         if (p.botGoal && p.botGoal.row !== -1) {
-            debugElements.push(h("div", {
+            elements = EffectArray.append(elements, h("div", {
                 style: {
                     position: "absolute",
                     left: `${p.botGoal.col * CELL_SIZE + CELL_SIZE/2 - 8}px`,
@@ -423,13 +410,14 @@ const renderBotDebug = (model: Model) => {
                 }
             }))
         }
-    }
-    return debugElements
+        return elements
+    })
 }
 
 const renderPlayers = (model: Model) => {
-    return EffectArray.map(model.players, p => {
-        if (!p.isAlive) return null
+    // We use EffectArray.flatMap to allow filtering players out (by returning []) or mapping them (returning [VNode])
+    return EffectArray.flatMap(model.players, p => {
+        if (!p.isAlive) return []
 
         const accessoryColor = "#E6005C", faceColor = "#FFCC99", beltColor = "#F0F0F0"
         const isBack = p.direction === "up"
@@ -445,15 +433,14 @@ const renderPlayers = (model: Model) => {
         const leftFootTop = animFrame === 0 ? "32px" : "30px"
         const rightFootTop = animFrame === 0 ? "30px" : "32px"
 
-        // === Powerup Emojis ===
         let statusEmojis = ""
         if (p.rainbowTimers.FireUp > 0 || p.rainbowTimers.BombUp > 0 || p.rainbowTimers.SpeedUp > 0) statusEmojis += "🌈"
         if (p.hasVest) statusEmojis += "🛡️"
         if (p.bombRange > 1) statusEmojis += "🔥"
         if (p.maxBombs > 1) statusEmojis += "💣"
-        if (p.speed > BASE_SPEED + 0.01) statusEmojis += "👟" // Check > base speed
+        if (p.speed > BASE_SPEED + 0.01) statusEmojis += "👟"
 
-        return h("div", {
+        return [h("div", {
             style: {
                 position: "absolute",
                 left: `${p.position.col * CELL_SIZE}px`,
@@ -465,11 +452,9 @@ const renderPlayers = (model: Model) => {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                // Phase 5: Aura for Vest (visual indicator)
                 ...(p.hasVest ? { filter: "drop-shadow(0 0 8px gold)" } : { filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.4))" })
             }
         }, [
-            // Phase 6: Player Label + Powerup Emojis
             h("div", {
                 style: {
                     position: "absolute", top: "-20px", fontSize: "14px", fontWeight: "bold", color: "#fff",
@@ -493,7 +478,7 @@ const renderPlayers = (model: Model) => {
             h("div", { style: { width: "7px", height: "7px", backgroundColor: accessoryColor, borderRadius: "50%", border: "1px solid #000", position: "absolute", top: rightHandTop, right: isSide ? "14px" : "4px", zIndex: "26", display: (isSide && !isRight) ? "none" : "block" } }),
             h("div", { style: { width: "8px", height: "6px", backgroundColor: accessoryColor, borderRadius: "3px", border: "1px solid #000", position: "absolute", top: leftFootTop, left: "8px", zIndex: "23", transition: "top 0.1s" } }),
             h("div", { style: { width: "8px", height: "6px", backgroundColor: accessoryColor, borderRadius: "3px", border: "1px solid #000", position: "absolute", top: rightFootTop, right: "8px", zIndex: "23", transition: "top 0.1s" } })
-        ])
+        ])]
     })
 }
 

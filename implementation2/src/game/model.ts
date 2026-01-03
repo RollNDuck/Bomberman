@@ -169,6 +169,9 @@ export const createGrid = (): Cell[][] => {
                 (r >= GRID_ROWS - 3 && c >= GRID_COLS - 3)
 
             if (!isSafeZone && Math.random() * 100 < settings.softBlockSpawnChance) {
+                // Use EffectArray.map instead of native map or direct assignment for strict purity if desired,
+                // but direct index assignment on local mutable array during initialization loop is standard.
+                // To be strictly functional:
                 grid[r] = EffectArray.map(grid[r], (cell, idx) =>
                     idx === c ? Cell.make({ ...cell, type: "soft" }) : cell
                 )
@@ -186,7 +189,7 @@ const botConfigs: Record<string, any> = {
         reevaluationChance: 0.25,
         dangerCheckDistance: 0,
         attackPlantDistance: 2,
-        attackTargetDistance: 15, // FIX: Increased from 0 to actually see enemies
+        attackTargetDistance: 15,
         dangerDetectionPolicy: "bombs_only",
         attackPolicy: "second",
         powerupPolicy: "second",
@@ -219,7 +222,7 @@ const botConfigs: Record<string, any> = {
         reevaluationChance: 0.1,
         dangerCheckDistance: 10,
         attackPlantDistance: 10,
-        attackTargetDistance: 15, // FIX: Increased to 15 (global-ish)
+        attackTargetDistance: 15,
         dangerDetectionPolicy: "explosion_range",
         attackPolicy: "second",
         powerupPolicy: "first",
@@ -229,14 +232,9 @@ const botConfigs: Record<string, any> = {
 
 export const initPlayers = (): Player[] => {
     const players: Player[] = []
-
-    // ALLOW 0-2 human players as per instructions (Phase 3: "It is possible for a game to start with all players being bots")
     const humanCount = Math.min(2, Math.max(0, settings.humanPlayers))
 
-    // Ensure botTypes is an array of strings
     const botTypes: string[] = Array.isArray(settings.botTypes) ? settings.botTypes : []
-
-    // Calculate total players (Human + Bots), capped at 4
     const totalPlayers = Math.min(4, humanCount + botTypes.length)
 
     const positions = [
@@ -255,12 +253,9 @@ export const initPlayers = (): Player[] => {
 
     return EffectArray.makeBy(totalPlayers, (i) => {
         const isHuman = i < humanCount
-        // If it's not a human, pick a bot type from the list.
-        // The list index shifts based on how many humans are already playing.
         const botTypeIndex = i - humanCount
         const botType = isHuman ? null : (botTypes[botTypeIndex] as string)
 
-        // Safety check: if botType is missing or invalid, default to 'hostile' to prevent crash
         const config = botType && botConfigs[botType] ? botConfigs[botType] : (isHuman ? null : botConfigs["hostile"])
         const appliedBotType = isHuman ? null : (botType || "hostile")
 
