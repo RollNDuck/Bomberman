@@ -5,8 +5,11 @@ import {
     FPS, BOMB_TIMER, EXPLOSION_DURATION, BASE_SPEED, SPEED_INCREMENT,
     DESTRUCTION_DELAY, WARMUP_SECONDS, createGrid, initModel
 } from "./model"
-import settings from "./settings"
-import { audioManager } from "./audio" // Phase 6: Import Audio Manager
+import * as settingsRaw from "../../settings.json"
+import { audioManager } from "./audio"
+
+// Robustly handle JSON import
+const settings = (settingsRaw as any).default || settingsRaw
 
 const P1_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", bomb: " " }
 const P2_KEYS = { up: "w", down: "s", left: "a", right: "d", bomb: "x" }
@@ -485,6 +488,11 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
                 if (Math.abs(diffX) > 0.05) {
                     moveX = Math.sign(diffX) * Math.min(Math.abs(diffX), player.speed * 0.5)
                 }
+            }
+
+            // Sync visual direction with AI direction
+            if (newAiDirection) {
+                newDirection = newAiDirection
             }
 
             // If very close to center, snap

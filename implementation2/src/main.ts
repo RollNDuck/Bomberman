@@ -2,6 +2,7 @@ import { startSimple } from "cs12251-mvu/src"
 import { initModel } from "./game/model"
 import { view } from "./game/view"
 import { update } from "./game/update"
+import { Array as EffectArray } from "effect"
 
 const root = document.getElementById("app")!
 
@@ -18,17 +19,20 @@ const wrappedView = (model: any, dispatch: (msg: any) => void) => {
 const setupEventListeners = () => {
     if (!currentDispatch) return
 
+    const controlKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x", "Escape", "r", "R"]
+    const releaseKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x"]
+
     document.addEventListener("keydown", (e) => {
-        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ",
-            "w", "a", "s", "d", "x", "Escape", "r", "R"].includes(e.key)) {
+        // Fix: Use EffectArray.contains to avoid native .includes()
+        if (EffectArray.contains(controlKeys, e.key)) {
             e.preventDefault()
             currentDispatch?.({ _tag: "KeyDown", key: e.key })
         }
     })
 
     document.addEventListener("keyup", (e) => {
-        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ",
-            "w", "a", "s", "d", "x"].includes(e.key)) {
+        // Fix: Use EffectArray.contains to avoid native .includes()
+        if (EffectArray.contains(releaseKeys, e.key)) {
             e.preventDefault()
             currentDispatch?.({ _tag: "KeyUp", key: e.key })
         }

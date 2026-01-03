@@ -106,8 +106,9 @@ const renderOverlays = (model: Model) => {
         const help = model.state === "matchOver" ? "Champion!" : "Press ESC"
 
         // Scoreboard
+        // Fix: Use EffectArray.map instead of native map
         const scoreList = h("div", { style: { display: "flex", gap: "20px", marginTop: "20px" } },
-            model.players.map(p => h("div", {
+            EffectArray.map(model.players, p => h("div", {
                 style: { display: "flex", alignItems: "center", fontSize: "24px", color: p.isAlive ? "#fff" : "#aaa" }
             }, [
                 h("div", {

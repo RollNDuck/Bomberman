@@ -1,5 +1,8 @@
 import { Schema as S, Array as EffectArray } from "effect"
-import settings from "./settings"
+import * as settingsRaw from "../../settings.json"
+
+// Robustly handle JSON import (works whether default export is synthesized or not)
+const settings = (settingsRaw as any).default || settingsRaw
 
 // Constants
 export const GRID_ROWS = 13
@@ -226,10 +229,14 @@ const botConfigs: Record<string, any> = {
 
 export const initPlayers = (): Player[] => {
     const players: Player[] = []
-    const humanCount = Math.min(2, Math.max(1, settings.humanPlayers))
-    const botTypes = settings.botTypes || []
 
-    // Using EffectArray.makeBy to generate players functionally
+    // ALLOW 0-2 human players as per instructions (Phase 3: "It is possible for a game to start with all players being bots")
+    const humanCount = Math.min(2, Math.max(0, settings.humanPlayers))
+
+    // Ensure botTypes is an array of strings
+    const botTypes: string[] = Array.isArray(settings.botTypes) ? settings.botTypes : []
+
+    // Calculate total players (Human + Bots), capped at 4
     const totalPlayers = Math.min(4, humanCount + botTypes.length)
 
     const positions = [
@@ -248,8 +255,14 @@ export const initPlayers = (): Player[] => {
 
     return EffectArray.makeBy(totalPlayers, (i) => {
         const isHuman = i < humanCount
-        const botType = isHuman ? null : (botTypes[i - humanCount] as string)
-        const config = botType ? botConfigs[botType] : null
+        // If it's not a human, pick a bot type from the list.
+        // The list index shifts based on how many humans are already playing.
+        const botTypeIndex = i - humanCount
+        const botType = isHuman ? null : (botTypes[botTypeIndex] as string)
+
+        // Safety check: if botType is missing or invalid, default to 'hostile' to prevent crash
+        const config = botType && botConfigs[botType] ? botConfigs[botType] : (isHuman ? null : botConfigs["hostile"])
+        const appliedBotType = isHuman ? null : (botType || "hostile")
 
         return Player.make({
             id: i + 1,
@@ -258,8 +271,8 @@ export const initPlayers = (): Player[] => {
             startPosition: Position.make(positions[i]),
             isAlive: true,
             isHuman,
-            botType,
-            botState: botType ? "WANDER" : null,
+            botType: appliedBotType as any,
+            botState: appliedBotType ? "WANDER" : null,
             botGoal: Position.make({ row: -1, col: -1 }),
             botPath: [],
             lastReevaluation: 0,
