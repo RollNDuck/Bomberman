@@ -13,7 +13,7 @@ export const BOMB_TIMER = 3
 export const EXPLOSION_DURATION = 1
 export const BASE_SPEED = 0.15
 export const SPEED_INCREMENT = 0.05
-export const DESTRUCTION_DELAY = 1.1
+export const DESTRUCTION_DELAY = 1.5
 export const WARMUP_SECONDS = 3
 export const GAME_DURATION = 180
 
@@ -45,6 +45,9 @@ export const Player = S.Struct({
     position: Position,
     isAlive: S.Boolean,
     isHuman: S.Boolean,
+
+    // Animation state
+    deathTime: S.Union(S.Int, S.Null),
 
     // Bot Configuration
     botType: S.Union(S.Literal("hostile", "careful", "greedy", "extreme"), S.Null),
@@ -125,10 +128,10 @@ export const Model = S.Struct({
     roundsToWin: S.Int,
     isDebugMode: S.Boolean,
 
-    // Death handling
-    deathTimer: S.Union(S.Int, S.Null),
+    // Game End States
     gamePhase: S.Union(S.Literal("active"), S.Literal("gameOver")),
-    gameOverMessage: S.String
+    gameOverMessage: S.String,
+    deathTimer: S.Union(S.Int, S.Null)
 })
 
 // --- Initialization Helpers ---
@@ -157,7 +160,7 @@ export const createGrid = (): Cell[][] => {
         })
     )
 
-    // Add soft blocks
+    // Add soft blocks using EffectArray mapping
     for (let r = 1; r < GRID_ROWS - 1; r++) {
         for (let c = 1; c < GRID_COLS - 1; c++) {
             if (grid[r][c].type === "hard") continue
@@ -169,9 +172,6 @@ export const createGrid = (): Cell[][] => {
                 (r >= GRID_ROWS - 3 && c >= GRID_COLS - 3)
 
             if (!isSafeZone && Math.random() * 100 < settings.softBlockSpawnChance) {
-                // Use EffectArray.map instead of native map or direct assignment for strict purity if desired,
-                // but direct index assignment on local mutable array during initialization loop is standard.
-                // To be strictly functional:
                 grid[r] = EffectArray.map(grid[r], (cell, idx) =>
                     idx === c ? Cell.make({ ...cell, type: "soft" }) : cell
                 )
@@ -182,7 +182,7 @@ export const createGrid = (): Cell[][] => {
     return grid
 }
 
-// Bot configuration presets
+// Bot configuration presets based on Instructions Phase 4 & Part 2
 const botConfigs: Record<string, any> = {
     hostile: {
         reevaluationInterval: 0.5,
@@ -222,7 +222,7 @@ const botConfigs: Record<string, any> = {
         reevaluationChance: 0.1,
         dangerCheckDistance: 10,
         attackPlantDistance: 10,
-        attackTargetDistance: 15,
+        attackTargetDistance: 15, // Default for Policy 2
         dangerDetectionPolicy: "explosion_range",
         attackPolicy: "second",
         powerupPolicy: "first",
@@ -247,8 +247,8 @@ export const initPlayers = (): Player[] => {
     const colors = [
         { main: "#FFFFFF", sub: "#0000FF" },
         { main: "#000000", sub: "#FF0000" },
-        { main: "#008000", sub: "#FFA500" },
-        { main: "#FFFF00", sub: "#800080" }
+        { main: "#002480ff", sub: "#FFA500" },
+        { main: "#ff9900ff", sub: "#800080" }
     ]
 
     return EffectArray.makeBy(totalPlayers, (i) => {
@@ -266,6 +266,7 @@ export const initPlayers = (): Player[] => {
             startPosition: Position.make(positions[i]),
             isAlive: true,
             isHuman,
+            deathTime: null,
             botType: appliedBotType as any,
             botState: appliedBotType ? "WANDER" : null,
             botGoal: Position.make({ row: -1, col: -1 }),
@@ -310,7 +311,7 @@ export const initModel = Model.make({
     roundWinner: null,
     roundsToWin: settings.roundsToWin,
     isDebugMode: false,
-    deathTimer: null,
     gamePhase: "active",
-    gameOverMessage: ""
+    gameOverMessage: "",
+    deathTimer: null
 })

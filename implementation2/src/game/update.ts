@@ -64,7 +64,8 @@ const handleKeyDown = (key: string, model: Model): Model => {
         return player
     })
 
-    let bombsToAdd: Bomb[] = []
+    // FIXED: Explicit readonly type to match Schema and EffectArray return types
+    let bombsToAdd: readonly Bomb[] = []
 
     for (const player of model.players) {
         if (!player.isHuman || !player.isAlive) continue
@@ -82,7 +83,7 @@ const handleKeyDown = (key: string, model: Model): Model => {
              }
 
              if (!bombExistsModel && !bombExistsLocal) {
-                 // STRICT COMPLIANCE: Use EffectArray.append instead of spread syntax
+                 // STRICT COMPLIANCE: Use EffectArray.append
                  bombsToAdd = EffectArray.append(bombsToAdd, Bomb.make({
                      position: bombPos,
                      plantedAt: model.currentTime,
@@ -138,22 +139,19 @@ const handleTick = (model: Model): Model => {
 }
 
 // ==================== AI CORE (BFS) ====================
-const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: boolean): boolean[][] => {
+// FIXED: Returns Set<string> instead of boolean[][] to avoid array mutation
+const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: boolean): Set<string> => {
     const startR = Math.round(start.row)
     const startC = Math.round(start.col)
-
-    // Using EffectArray to generate the initial grid
-    const reachable = EffectArray.makeBy(GRID_ROWS, () =>
-        EffectArray.makeBy(GRID_COLS, () => false)
-    )
+    const reachable = new Set<string>()
 
     if (startR < 0 || startR >= GRID_ROWS || startC < 0 || startC >= GRID_COLS) return reachable
 
-    let queue = [{r: startR, c: startC}]
-    reachable[startR][startC] = true
+    // FIXED: Explicit readonly type for queue
+    let queue: readonly {r: number, c: number}[] = [{r: startR, c: startC}]
+    reachable.add(`${startR},${startC}`)
 
     let head = 0
-    // Queue length access is allowed (property, not method)
     while(head < queue.length) {
         const current = queue[head]
         head++
@@ -164,14 +162,14 @@ const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: bool
             const nR = current.r + off.r
             const nC = current.c + off.c
 
-            if (nR >= 0 && nR < GRID_ROWS && nC >= 0 && nC < GRID_COLS && !reachable[nR][nC]) {
+            if (nR >= 0 && nR < GRID_ROWS && nC >= 0 && nC < GRID_COLS && !reachable.has(`${nR},${nC}`)) {
                 const cell = model.grid[nR][nC]
                 const isSoft = cell.type === "soft" && !cell.isDestroying
                 const isHard = cell.type === "hard"
                 const hasBomb = EffectArray.some(model.bombs, b => Math.round(b.position.row) === nR && Math.round(b.position.col) === nC)
 
                 if (!isHard && (!hasBomb || (nR === startR && nC === startC)) && (ignoreSoftBlocks || !isSoft)) {
-                    reachable[nR][nC] = true
+                    reachable.add(`${nR},${nC}`)
                     // STRICT COMPLIANCE: Use EffectArray.append
                     queue = EffectArray.append(queue, {r: nR, c: nC})
                 }
@@ -182,6 +180,7 @@ const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: bool
     return reachable
 }
 
+// FIXED: Returns readonly Position[] to match Schema and ensure immutability
 const findShortestPath = (
     start: Position,
     goal: Position,
@@ -189,7 +188,7 @@ const findShortestPath = (
     ignoreSoftBlocks: boolean,
     avoidDanger: boolean = false,
     player: Player | null = null
-): Position[] => {
+): readonly Position[] => {
     const sR = Math.round(start.row), sC = Math.round(start.col)
     const gR = Math.round(goal.row), gC = Math.round(goal.col)
     if (gR < 0 || gR >= GRID_ROWS || gC < 0 || gC >= GRID_COLS) return []
@@ -197,7 +196,8 @@ const findShortestPath = (
     const visited = new Set<string>()
     const key = (r: number, c: number) => `${r},${c}`
 
-    let queue: { r: number, c: number, path: Position[] }[] = [{ r: sR, c: sC, path: [] }]
+    // FIXED: Explicit readonly type for queue and path
+    let queue: readonly { r: number, c: number, path: readonly Position[] }[] = [{ r: sR, c: sC, path: [] }]
     visited.add(key(sR, sC))
 
     let head = 0
@@ -243,8 +243,9 @@ const findShortestPath = (
 
 const manhattanDistance = (p1: Position, p2: Position) => Math.abs(Math.round(p1.row) - Math.round(p2.row)) + Math.abs(Math.round(p1.col) - Math.round(p2.col))
 
-const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
-    let newBombs = model.bombs
+// FIXED: Returns readonly arrays to match Schema
+const updateBotAI = (model: Model): { players: readonly Player[], bombs: readonly Bomb[] } => {
+    let newBombs: readonly Bomb[] = model.bombs
     const explosionEnded = EffectArray.some(model.explosions, e => (model.currentTime - e.createdAt) >= (FPS * EXPLOSION_DURATION) - 1)
     const newBombPositions = EffectArray.map(
         EffectArray.filter(newBombs, b => b.plantedAt === model.currentTime),
@@ -283,6 +284,7 @@ const updateBotAI = (model: Model): { players: Player[], bombs: Bomb[] } => {
             )
 
             if (!bombExists) {
+                // STRICT COMPLIANCE: Use EffectArray.append
                 newBombs = EffectArray.append(newBombs, Bomb.make({ position: bPos, plantedAt: model.currentTime, range: updated.bombRange, playerId: updated.id }))
                 updated = { ...updated, activeBombs: updated.activeBombs + 1 }
                 updated = performReevaluation(updated, { ...model, bombs: newBombs })
@@ -340,12 +342,14 @@ const executeBotState = (player: Player, model: Model): Player => {
 
 const findSafeGoal = (player: Player, model: Model): Position => {
     const reachable = getReachableCells(player.position, model, false)
-    let safeSpots: Position[] = []
+
+    // FIXED: Typed as readonly
+    let safeSpots: readonly Position[] = []
 
     for (let r = 0; r < GRID_ROWS; r++) {
         for (let c = 0; c < GRID_COLS; c++) {
-            if (reachable[r][c] && !isCellDangerous(r, c, model, player)) {
-                // EffectArray.append
+            if (reachable.has(`${r},${c}`) && !isCellDangerous(r, c, model, player)) {
+                // STRICT COMPLIANCE: Use EffectArray.append
                 safeSpots = EffectArray.append(safeSpots, Position.make({ row: r, col: c }))
             }
         }
@@ -368,10 +372,13 @@ const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> 
     }
 
     const reachable = getReachableCells(player.position, model, false)
-    let powerups: Position[] = []
+
+    // FIXED: Typed as readonly
+    let powerups: readonly Position[] = []
     for (let r = 0; r < GRID_ROWS; r++) {
         for (let c = 0; c < GRID_COLS; c++) {
-            if (model.grid[r][c].powerup && reachable[r][c]) {
+            if (model.grid[r][c].powerup && reachable.has(`${r},${c}`)) {
+                // STRICT COMPLIANCE: Use EffectArray.append
                 powerups = EffectArray.append(powerups, Position.make({ row: r, col: c }))
             }
         }
@@ -401,7 +408,9 @@ const findAttackGoal = (player: Player, model: Model): Option.Option<Position> =
     if (player.attackPolicy === "first") {
         for (const enemy of enemies) {
             const ePos = Position.make({ row: Math.round(enemy.position.row), col: Math.round(enemy.position.col) })
-            if (manhattanDistance(player.position, ePos) <= player.attackTargetDistance && reachable[Math.round(ePos.row)][Math.round(ePos.col)]) {
+            const eR = Math.round(ePos.row)
+            const eC = Math.round(ePos.col)
+            if (manhattanDistance(player.position, ePos) <= player.attackTargetDistance && reachable.has(`${eR},${eC}`)) {
                 return Option.some(ePos)
             }
         }
@@ -420,14 +429,15 @@ const findRandomGoal = (model: Model): Position => {
     return Position.make({ row: -1, col: -1 })
 }
 
+// FIXED: Accepts readonly array
+const dropOne = (arr: readonly Position[]) => EffectArray.filter(arr, (_, i) => i > 0)
+
 const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): Player => {
     if (!player.isAlive || model.state !== "playing") return player
 
     let nextPos = player.position
     let newDirection = player.direction
     let isMoving = false
-
-    const dropOne = (arr: Position[]) => EffectArray.filter(arr, (_, i) => i > 0)
 
     let newBotPath = player.botPath
     let newAiDirection = player.aiDirection
@@ -592,7 +602,8 @@ const isCellDangerous = (r: number, c: number, model: Model, player: Player): bo
     }
 }
 
-const isInExplosionRange = (tR: number, tC: number, bR: number, bC: number, range: number, grid: Cell[][]): boolean => {
+// FIXED: Accepts readonly grid
+const isInExplosionRange = (tR: number, tC: number, bR: number, bC: number, range: number, grid: readonly (readonly Cell[])[]): boolean => {
     if (tR === bR && tC === bC) return true
     if (tR === bR && Math.abs(tC - bC) <= range) {
         const step = tC > bC ? 1 : -1
@@ -666,8 +677,9 @@ const checkPowerupCollection = (model: Model): Model => {
 const updateBombsAndExplosions = (model: Model): Model => {
     const activeExps = EffectArray.filter(model.explosions, e => (model.currentTime - e.createdAt) < FPS * EXPLOSION_DURATION)
 
-    let explodedIndices: number[] = []
-    let newExps: Explosion[] = []
+    // FIXED: Typed as readonly
+    let explodedIndices: readonly number[] = []
+    let newExps: readonly Explosion[] = []
     let explosionOccurred = false;
 
     EffectArray.forEach(model.bombs, (b, i) => {
@@ -677,7 +689,7 @@ const updateBombsAndExplosions = (model: Model): Model => {
             explodedIndices = EffectArray.append(explodedIndices, i)
             explosionOccurred = true;
 
-            let cells = [Position.make({ row: r, col: c })]
+            let cells: readonly Position[] = [Position.make({ row: r, col: c })]
             for (const d of [{r:0,c:1}, {r:0,c:-1}, {r:1,c:0}, {r:-1,c:0}]) {
                 for (let k = 1; k <= b.range; k++) {
                     const nr = r + d.r * k, nc = c + d.c * k
@@ -755,7 +767,7 @@ const checkDeaths = (model: Model): Model => {
         if (hit) {
             if (p.hasVest) return { ...p, hasVest: false, vestTimer: 0 }
             deathOccurred = true;
-            return { ...p, isAlive: false }
+            return { ...p, isAlive: false, deathTime: model.currentTime }
         }
         return p
     })

@@ -44,7 +44,7 @@ export const IMAGES = {
                 up: getUrl('img/bombermen/characters/p1/walk/right/top.png'),
             },
             DEATH: EffectArray.map(EffectArray.range(1, 7), i =>
-                getUrl(`img/bombermen/characters/death/p1/${i}.png`)
+                getUrl(`img/bombermen/death/p1/${i}.png`)
             ),
         },
         P2: {
@@ -67,7 +67,7 @@ export const IMAGES = {
                 up: getUrl('img/bombermen/characters/p2/walk/right/top.png'),
             },
             DEATH: EffectArray.map(EffectArray.range(1, 7), i =>
-                getUrl(`img/bombermen/characters/death/p2/${i}.png`)
+                getUrl(`img/bombermen/death/p2/${i}.png`)
             ),
         },
         P3: {
@@ -90,7 +90,7 @@ export const IMAGES = {
                 up: getUrl('img/bombermen/characters/p3/walk/right/top.png'),
             },
             DEATH: EffectArray.map(EffectArray.range(1, 7), i =>
-                getUrl(`img/bombermen/characters/death/p3/${i}.png`)
+                getUrl(`img/bombermen/death/p3/${i}.png`)
             ),
         },
         P4: {
@@ -113,7 +113,7 @@ export const IMAGES = {
                 up: getUrl('img/bombermen/characters/p4/walk/right/top.png'),
             },
             DEATH: EffectArray.map(EffectArray.range(1, 7), i =>
-                getUrl(`img/bombermen/characters/death/p4/${i}.png`)
+                getUrl(`img/bombermen/death/p4/${i}.png`)
             ),
         }
     },

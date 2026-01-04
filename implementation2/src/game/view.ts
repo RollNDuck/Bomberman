@@ -15,6 +15,47 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
         else timeStr = "GO!"
     }
 
+    const playerStats = EffectArray.map(model.players, p =>
+        h("div", { style: { display: "flex", alignItems: "center", opacity: p.isAlive ? "1" : "0.5" } }, [
+            h("div", {
+                style: {
+                    width: "20px", height: "20px", backgroundColor: p.color,
+                    border: "2px solid #000", borderRadius: "50%", marginRight: "5px"
+                }
+            }),
+            h("div", {
+                style: { backgroundColor: "#000", color: "#fff", padding: "0 5px", border: "1px solid #fff" }
+            }, p.wins.toString())
+        ])
+    )
+
+    // Build grid layers using functional composition
+    let gridChildren: any[] = []
+
+    const renderedGrid = renderGrid(model)
+    const renderedBombs = renderBombs(model)
+    const renderedExplosions = renderExplosions(model)
+    const renderedPlayers = renderPlayers(model)
+    const renderedDebug = renderBotDebug(model)
+
+    gridChildren = EffectArray.appendAll(gridChildren, renderedGrid)
+    gridChildren = EffectArray.appendAll(gridChildren, renderedBombs)
+    gridChildren = EffectArray.appendAll(gridChildren, renderedExplosions)
+    gridChildren = EffectArray.appendAll(gridChildren, renderedPlayers)
+    gridChildren = EffectArray.appendAll(gridChildren, renderedDebug)
+
+    const overlay = renderOverlays(model)
+    if (overlay) {
+        gridChildren = EffectArray.append(gridChildren, overlay)
+    }
+
+    if (model.gamePhase === "gameOver") {
+        const go = renderGameOver(model)
+        if (go) {
+             gridChildren = EffectArray.append(gridChildren, go)
+        }
+    }
+
     return h("div", {
         style: {
             display: "flex",
@@ -46,21 +87,7 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
                      }
                  }, timeStr)
             ]),
-            h("div", { style: { display: "flex", gap: "10px" } },
-                EffectArray.map(model.players, p =>
-                    h("div", { style: { display: "flex", alignItems: "center", opacity: p.isAlive ? 1 : 0.5 } }, [
-                        h("div", {
-                            style: {
-                                width: "20px", height: "20px", backgroundColor: p.color,
-                                border: "2px solid #000", borderRadius: "50%", marginRight: "5px"
-                            }
-                        }),
-                        h("div", {
-                            style: { backgroundColor: "#000", color: "#fff", padding: "0 5px", border: "1px solid #fff" }
-                        }, p.wins.toString())
-                    ])
-                )
-            )
+            h("div", { style: { display: "flex", gap: "10px" } }, playerStats)
         ]),
 
         h("div", {
@@ -75,15 +102,7 @@ export const view = (model: Model, dispatch: (msg: Msg) => void) => {
                 backgroundSize: `${CELL_SIZE}px`,
                 imageRendering: "pixelated"
             }
-        }, [
-            renderGrid(model),
-            renderBombs(model),
-            renderExplosions(model),
-            renderPlayers(model),
-            renderBotDebug(model),
-            renderOverlays(model),
-            model.gamePhase === "gameOver" ? renderGameOver(model) : null
-        ].flat().filter(Boolean))
+        }, gridChildren)
     ])
 }
 
@@ -97,10 +116,10 @@ const renderOverlays = (model: Model) => {
 
         return h("div", {
             style: {
-                position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                position: "absolute", top: "0", left: "0", width: "100%", height: "100%",
                 display: "flex", justifyContent: "center", alignItems: "center",
                 backgroundColor: "rgba(0,0,0,0.3)", color: "#FFF", fontSize: "80px", fontWeight: "bold",
-                textShadow: "4px 4px #000", zIndex: 100
+                textShadow: "4px 4px #000", zIndex: "100"
             }
         }, text)
     }
@@ -123,9 +142,9 @@ const renderOverlays = (model: Model) => {
 
         return h("div", {
             style: {
-                position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                position: "absolute", top: "0", left: "0", width: "100%", height: "100%",
                 display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
-                backgroundColor: "rgba(0,0,0,0.85)", color: "#FFF", zIndex: 100
+                backgroundColor: "rgba(0,0,0,0.85)", color: "#FFF", zIndex: "100"
             }
         }, [
             h("h1", { style: { fontSize: "60px", color: "#FFD700", marginBottom: "20px" } }, title),
@@ -138,14 +157,12 @@ const renderOverlays = (model: Model) => {
 }
 
 const renderGrid = (model: Model) => {
-    const elements = []
-
-    for (let r = 0; r < GRID_ROWS; r++) {
-        for (let c = 0; c < GRID_COLS; c++) {
+    return EffectArray.flatMap(EffectArray.range(0, GRID_ROWS - 1), r =>
+        EffectArray.flatMap(EffectArray.range(0, GRID_COLS - 1), c => {
             const cell = model.grid[r][c]
 
             // Render floor background
-            elements.push(h("div", {
+            const floor = h("div", {
                 style: {
                     position: "absolute",
                     left: `${c * CELL_SIZE}px`,
@@ -157,11 +174,13 @@ const renderGrid = (model: Model) => {
                     zIndex: "0",
                     imageRendering: "pixelated"
                 }
-            }))
+            })
+
+            let objectOnTop = null
 
             if (cell.type === "hard") {
                 // Hard block
-                elements.push(h("div", {
+                objectOnTop = h("div", {
                     style: {
                         position: "absolute",
                         left: `${c * CELL_SIZE}px`,
@@ -173,20 +192,20 @@ const renderGrid = (model: Model) => {
                         zIndex: "1",
                         imageRendering: "pixelated"
                     }
-                }))
+                })
             } else if (cell.type === "soft") {
                 // Soft block
                 let opacity = 1;
                 let frameIndex = 0;
 
                 if (cell.isDestroying) {
-                    const maxTime = FPS * 1.1;
+                    const maxTime = FPS * 1.5;
                     const progress = 1 - (cell.destroyTimer / maxTime);
                     opacity = 1 - progress;
                     frameIndex = Math.min(Math.floor(progress * 9), 8);
                 }
 
-                elements.push(h("div", {
+                objectOnTop = h("div", {
                     style: {
                         position: "absolute",
                         left: `${c * CELL_SIZE}px`,
@@ -196,11 +215,11 @@ const renderGrid = (model: Model) => {
                         backgroundImage: `url("${IMAGES.SOFT_BLOCK_FRAMES[frameIndex]}")`,
                         backgroundSize: "cover",
                         zIndex: "1",
-                        opacity: opacity,
+                        opacity: opacity.toString(),
                         imageRendering: "pixelated",
                         transition: opacity > 0.1 ? "opacity 0.1s" : "none"
                     }
-                }))
+                })
             } else if (cell.powerup) {
                 // Animated power-up
                 const bob = Math.sin(model.currentTime / 5) * 4;
@@ -218,7 +237,6 @@ const renderGrid = (model: Model) => {
                         powerupFrames = IMAGES.POWERUPS.SPEED_UP;
                         break;
                     case "Rainbow":
-                        // Rainbow cycles through different powerups
                         const rainbowIndex = Math.floor(model.currentTime / 10) % 3;
                         powerupFrames = [
                             IMAGES.POWERUPS.FIRE_UP[rainbowIndex % IMAGES.POWERUPS.FIRE_UP.length],
@@ -228,7 +246,6 @@ const renderGrid = (model: Model) => {
                         filter = "hue-rotate(180deg)";
                         break;
                     case "Vest":
-                        // Use bomb up image with gold tint for vest
                         powerupFrames = IMAGES.POWERUPS.BOMB_UP;
                         filter = "hue-rotate(60deg) brightness(1.5)";
                         break;
@@ -238,7 +255,7 @@ const renderGrid = (model: Model) => {
                     const frameIndex = Math.floor(model.currentTime / 10) % powerupFrames.length;
                     const currentFrame = powerupFrames[frameIndex];
 
-                    elements.push(h("div", {
+                    objectOnTop = h("div", {
                         style: {
                             position: "absolute",
                             left: `${c * CELL_SIZE}px`,
@@ -253,12 +270,13 @@ const renderGrid = (model: Model) => {
                             imageRendering: "pixelated",
                             filter: filter
                         }
-                    }))
+                    })
                 }
             }
-        }
-    }
-    return elements
+
+            return objectOnTop ? [floor, objectOnTop] : [floor]
+        })
+    )
 }
 
 const renderBombs = (model: Model) => {
@@ -282,24 +300,19 @@ const renderBombs = (model: Model) => {
 }
 
 const renderExplosions = (model: Model) => {
-    const elements = []
-
-    for (const exp of model.explosions) {
+    return EffectArray.flatMap(model.explosions, exp => {
         const age = model.currentTime - exp.createdAt;
-        const maxAge = FPS * 1; // 1 second explosion duration
+        const maxAge = FPS * 1;
         const lifeLeft = 1 - (age / maxAge);
 
-        // 7 frames instead of 4
         const frameCount = 7;
         const frameIndex = Math.min(Math.floor((1 - lifeLeft) * frameCount), frameCount - 1);
         const opacity = Math.min(1, lifeLeft * 1.5);
 
-        // Use the simple explosion array with 7 frames
         const explosionImage = IMAGES.EXPLOSION[frameIndex];
 
-        // If explosions have chain cells, render them all with the same sprite
-        for (const pos of exp.cells) {
-            elements.push(h("div", {
+        return EffectArray.map(exp.cells, pos => {
+            return h("div", {
                 style: {
                     position: "absolute",
                     left: `${Math.floor(pos.col) * CELL_SIZE}px`,
@@ -314,26 +327,26 @@ const renderExplosions = (model: Model) => {
                     backgroundSize: "contain",
                     backgroundRepeat: "no-repeat",
                     backgroundPosition: "center",
-                    opacity: opacity,
+                    opacity: opacity.toString(),
                     imageRendering: "pixelated",
                     pointerEvents: "none"
                 }
-            }));
-        }
-    }
-    return elements
+            })
+        })
+    })
 }
 
 const renderBotDebug = (model: Model) => {
     if (!model.isDebugMode) return []
 
-    const debugElements: any[] = []
-    for (const p of model.players) {
-        if (p.isHuman || !p.isAlive) continue
+    return EffectArray.flatMap(model.players, p => {
+        if (p.isHuman || !p.isAlive) return []
+
+        let debugItems: any[] = []
 
         if (p.dangerCheckDistance > 0) {
             const radius = p.dangerCheckDistance * CELL_SIZE
-            debugElements.push(h("div", {
+            const circle = h("div", {
                 style: {
                     position: "absolute",
                     left: `${(p.position.col * CELL_SIZE) + (CELL_SIZE / 2) - radius}px`,
@@ -345,13 +358,14 @@ const renderBotDebug = (model: Model) => {
                     zIndex: "40",
                     pointerEvents: "none"
                 }
-            }))
+            })
+            debugItems = EffectArray.append(debugItems, circle)
         }
 
         const botTypeText = p.botType ? p.botType : "human"
         const botStateText = p.botState ? p.botState : "none"
 
-        debugElements.push(h("div", {
+        const textLabel = h("div", {
             style: {
                 position: "absolute",
                 left: `${p.position.col * CELL_SIZE}px`,
@@ -368,11 +382,12 @@ const renderBotDebug = (model: Model) => {
                 marginLeft: `${CELL_SIZE / 2}px`,
                 border: "1px solid #fff"
             }
-        }, `${botTypeText}: ${botStateText}`))
+        }, `${botTypeText}: ${botStateText}`)
+
+        debugItems = EffectArray.append(debugItems, textLabel)
 
         if (p.botPath && p.botPath.length > 0) {
-            for (let i = 0; i < p.botPath.length; i++) {
-                const pos = p.botPath[i]
+            const pathDots = EffectArray.map(p.botPath, (pos, i) => {
                 let cornerStyle: any = {}
 
                 if (p.id === 2) {
@@ -385,7 +400,7 @@ const renderBotDebug = (model: Model) => {
                     cornerStyle = { top: "2px", left: "2px", right: "auto", bottom: "auto" }
                 }
 
-                debugElements.push(h("div", {
+                return h("div", {
                     style: {
                         position: "absolute",
                         left: `${pos.col * CELL_SIZE}px`,
@@ -406,12 +421,13 @@ const renderBotDebug = (model: Model) => {
                             ...cornerStyle
                         }
                     })
-                ]))
-            }
+                ])
+            })
+            debugItems = EffectArray.appendAll(debugItems, pathDots)
         }
 
         if (p.botGoal && p.botGoal.row !== -1) {
-            debugElements.push(h("div", {
+            const goalDot = h("div", {
                 style: {
                     position: "absolute",
                     left: `${p.botGoal.col * CELL_SIZE + CELL_SIZE/2 - 8}px`,
@@ -423,12 +439,14 @@ const renderBotDebug = (model: Model) => {
                     borderRadius: "50%",
                     zIndex: "35",
                     pointerEvents: "none",
-                    opacity: 0.8
+                    opacity: "0.8"
                 }
-            }))
+            })
+            debugItems = EffectArray.append(debugItems, goalDot)
         }
-    }
-    return debugElements
+
+        return debugItems
+    })
 }
 
 const renderPlayers = (model: Model) => {
@@ -441,19 +459,41 @@ const renderPlayers = (model: Model) => {
         if (!p.isAlive) {
             const deathTime = p.deathTime || model.currentTime;
             const deathAge = model.currentTime - deathTime;
-            const deathDuration = FPS * 2;
+            const deathDuration = FPS * 1;
             const deathProgress = Math.min(deathAge / deathDuration, 1);
-            const deathFrameIndex = Math.min(Math.floor(deathProgress * 7), 6);
+
+            // Hide completely after animation finishes
+            if (deathProgress >= 1) {
+                return null; // Don't render anything
+            }
+
+            // Calculate frame index (0-6 for 7 frames)
+            const framesPerSecond = 7;
+            const deathFrameIndex = Math.min(
+                Math.floor((deathAge / FPS) * framesPerSecond),
+                6
+            );
 
             const deathImage = assets.DEATH[deathFrameIndex];
 
+            // Optional: Add fade out effect in last 0.5 seconds
+            const fadeOpacity = deathProgress > 0.75 ? (1 - ((deathProgress - 0.75) / 0.25)) : 1;
+
             return h("div", {
                 style: {
-                    position: "absolute", left: `${p.position.col * CELL_SIZE}px`, top: `${p.position.row * CELL_SIZE}px`,
-                    width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`, zIndex: "20",
+                    position: "absolute",
+                    left: `${p.position.col * CELL_SIZE}px`,
+                    top: `${p.position.row * CELL_SIZE}px`,
+                    width: `${CELL_SIZE}px`,
+                    height: `${CELL_SIZE}px`,
+                    zIndex: "20",
                     backgroundImage: `url("${deathImage}")`,
-                    backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center",
+                    backgroundSize: "contain",
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "center",
                     imageRendering: "pixelated",
+                    opacity: fadeOpacity.toString(),
+                    transition: "opacity 0.2s"
                 }
             })
         }
