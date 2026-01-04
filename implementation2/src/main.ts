@@ -19,12 +19,10 @@ const wrappedView = (model: any, dispatch: (msg: any) => void) => {
 const setupEventListeners = () => {
     if (!currentDispatch) return
 
-    // Removed "r" and "R" from control keys
     const controlKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x", "Escape"]
     const releaseKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x"]
 
     document.addEventListener("keydown", (e) => {
-        // Fix: Use EffectArray.contains to avoid native .includes()
         if (EffectArray.contains(controlKeys, e.key)) {
             e.preventDefault()
             currentDispatch?.({ _tag: "KeyDown", key: e.key })
@@ -32,7 +30,6 @@ const setupEventListeners = () => {
     })
 
     document.addEventListener("keyup", (e) => {
-        // Fix: Use EffectArray.contains to avoid native .includes()
         if (EffectArray.contains(releaseKeys, e.key)) {
             e.preventDefault()
             currentDispatch?.({ _tag: "KeyUp", key: e.key })

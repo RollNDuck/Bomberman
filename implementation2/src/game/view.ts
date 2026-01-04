@@ -236,19 +236,6 @@ const renderGrid = (model: Model) => {
                     case "SpeedUp":
                         powerupFrames = IMAGES.POWERUPS.SPEED_UP;
                         break;
-                    case "Rainbow":
-                        const rainbowIndex = Math.floor(model.currentTime / 10) % 3;
-                        powerupFrames = [
-                            IMAGES.POWERUPS.FIRE_UP[rainbowIndex % IMAGES.POWERUPS.FIRE_UP.length],
-                            IMAGES.POWERUPS.BOMB_UP[rainbowIndex % IMAGES.POWERUPS.BOMB_UP.length],
-                            IMAGES.POWERUPS.SPEED_UP[rainbowIndex % IMAGES.POWERUPS.SPEED_UP.length]
-                        ];
-                        filter = "hue-rotate(180deg)";
-                        break;
-                    case "Vest":
-                        powerupFrames = IMAGES.POWERUPS.BOMB_UP;
-                        filter = "hue-rotate(60deg) brightness(1.5)";
-                        break;
                 }
 
                 if (powerupFrames.length > 0) {
@@ -515,8 +502,6 @@ const renderPlayers = (model: Model) => {
         }
 
         let statusEmojis = ""
-        if (p.rainbowTimers?.FireUp > 0 || p.rainbowTimers?.BombUp > 0 || p.rainbowTimers?.SpeedUp > 0) statusEmojis += "🌈"
-        if (p.hasVest) statusEmojis += "🛡️"
         if (p.bombRange > 1) statusEmojis += "🔥"
         if (p.maxBombs > 1) statusEmojis += "💣"
         if (p.speed > BASE_SPEED + 0.01) statusEmojis += "👟"
@@ -532,8 +517,7 @@ const renderPlayers = (model: Model) => {
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                justifyContent: "center",
-                ...(p.hasVest ? { filter: "drop-shadow(0 0 8px gold)" } : {})
+                justifyContent: "center"
             }
         }, [
             h("div", {
@@ -549,8 +533,7 @@ const renderPlayers = (model: Model) => {
                     width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px`,
                     backgroundImage: `url("${playerImage}")`,
                     backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center",
-                    imageRendering: "pixelated",
-                    ...(p.hasVest ? { filter: `drop-shadow(0 0 8px gold)` } : {})
+                    imageRendering: "pixelated"
                 }
             })
         ])

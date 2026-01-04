@@ -1,7 +1,6 @@
 import { Schema as S, Array as EffectArray } from "effect"
 import * as settingsRaw from "../../settings.json"
 
-// Robustly handle JSON import (works whether default export is synthesized or not)
 const settings = (settingsRaw as any).default || settingsRaw
 
 // Constants
@@ -32,7 +31,7 @@ export const Cell = S.Struct({
     isDestroying: S.Boolean,
     destroyTimer: S.Number,
     powerup: S.Union(
-        S.Literal("FireUp", "BombUp", "SpeedUp", "Rainbow", "Vest"),
+        S.Literal("FireUp", "BombUp", "SpeedUp"),
         S.Null
     ),
 })
@@ -50,7 +49,7 @@ export const Player = S.Struct({
     deathTime: S.Union(S.Int, S.Null),
 
     // Bot Configuration
-    botType: S.Union(S.Literal("hostile", "careful", "greedy", "extreme"), S.Null),
+    botType: S.Union(S.Literal("hostile", "careful", "greedy"), S.Null),
     botState: S.Union(S.Literal("WANDER", "ATTACK", "ESCAPE", "GET_POWERUP"), S.Null),
     botGoal: Position,
     botPath: S.Array(Position),
@@ -73,15 +72,6 @@ export const Player = S.Struct({
     bombRange: S.Int,
     maxBombs: S.Int,
     activeBombs: S.Int,
-
-    // Powerup Effects
-    hasVest: S.Boolean,
-    vestTimer: S.Number,
-    rainbowTimers: S.Struct({
-        FireUp: S.Number,
-        BombUp: S.Number,
-        SpeedUp: S.Number
-    }),
 
     // Visuals
     color: S.String,
@@ -134,7 +124,7 @@ export const Model = S.Struct({
     deathTimer: S.Union(S.Int, S.Null)
 })
 
-// --- Initialization Helpers ---
+// Initialization Helpers
 
 export const createGrid = (): Cell[][] => {
     const grid = EffectArray.makeBy(GRID_ROWS, (r) =>
@@ -160,7 +150,7 @@ export const createGrid = (): Cell[][] => {
         })
     )
 
-    // Add soft blocks using EffectArray mapping
+    // Add soft blocks w/ mapping
     for (let r = 1; r < GRID_ROWS - 1; r++) {
         for (let c = 1; c < GRID_COLS - 1; c++) {
             if (grid[r][c].type === "hard") continue
@@ -182,7 +172,7 @@ export const createGrid = (): Cell[][] => {
     return grid
 }
 
-// Bot configuration presets based on Instructions Phase 4 & Part 2
+// Phase 4: Bot configuration presets
 const botConfigs: Record<string, any> = {
     hostile: {
         reevaluationInterval: 0.5,
@@ -214,17 +204,6 @@ const botConfigs: Record<string, any> = {
         attackTargetDistance: 6,
         dangerDetectionPolicy: "explosion_range",
         attackPolicy: "first",
-        powerupPolicy: "first",
-        powerupPolicyChance: 1.0
-    },
-    extreme: {
-        reevaluationInterval: 0.1,
-        reevaluationChance: 0.1,
-        dangerCheckDistance: 10,
-        attackPlantDistance: 10,
-        attackTargetDistance: 15, // Default for Policy 2
-        dangerDetectionPolicy: "explosion_range",
-        attackPolicy: "second",
         powerupPolicy: "first",
         powerupPolicyChance: 1.0
     }
@@ -286,9 +265,6 @@ export const initPlayers = (): Player[] => {
             bombRange: 1,
             maxBombs: 1,
             activeBombs: 0,
-            hasVest: false,
-            vestTimer: 0,
-            rainbowTimers: { FireUp: 0, BombUp: 0, SpeedUp: 0 },
             color: colors[i].main,
             subColor: colors[i].sub,
             direction: "down",

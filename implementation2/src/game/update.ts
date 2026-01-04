@@ -8,13 +8,12 @@ import {
 import * as settingsRaw from "../../settings.json"
 import { audioManager } from "./audio"
 
-// Robustly handle JSON import
 const settings = (settingsRaw as any).default || settingsRaw
 
 const P1_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", bomb: " " }
 const P2_KEYS = { up: "w", down: "s", left: "a", right: "d", bomb: "x" }
 
-// ==================== MAIN UPDATE ====================
+// MAIN UPDATE
 export const update = (msg: Msg, model: Model): Model => {
     return Match.value(msg).pipe(
         Match.tag("KeyDown", ({ key }) => handleKeyDown(key, model)),
@@ -31,7 +30,6 @@ const handleKeyDown = (key: string, model: Model): Model => {
         k === "ArrowUp" || k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight" || k === " " ||
         k === "w" || k === "a" || k === "s" || k === "d" || k === "x" ||
         k === "Escape"
-        // 'r' key removed
 
     if (!isControlKey(key)) return model
 
@@ -64,7 +62,6 @@ const handleKeyDown = (key: string, model: Model): Model => {
         return player
     })
 
-    // FIXED: Explicit readonly type to match Schema and EffectArray return types
     let bombsToAdd: readonly Bomb[] = []
 
     for (const player of model.players) {
@@ -83,7 +80,6 @@ const handleKeyDown = (key: string, model: Model): Model => {
              }
 
              if (!bombExistsModel && !bombExistsLocal) {
-                 // STRICT COMPLIANCE: Use EffectArray.append
                  bombsToAdd = EffectArray.append(bombsToAdd, Bomb.make({
                      position: bombPos,
                      plantedAt: model.currentTime,
@@ -124,7 +120,7 @@ const handleTick = (model: Model): Model => {
         )
     )
 
-    const playersWithTimers = EffectArray.map(model.players, updatePlayerTimers)
+    const playersWithTimers = model.players
     const intermediateModel = { ...model, grid: nextGrid, players: playersWithTimers, currentTime: nextTime }
 
     const { players: playersWithAI, bombs: bombsAfterAI } = updateBotAI(intermediateModel)
@@ -138,8 +134,7 @@ const handleTick = (model: Model): Model => {
     return { ...checkDeaths(afterExplosions), roundTimer: model.roundTimer - 1 }
 }
 
-// ==================== AI CORE (BFS) ====================
-// FIXED: Returns Set<string> instead of boolean[][] to avoid array mutation
+// AI CORE (BFS)
 const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: boolean): Set<string> => {
     const startR = Math.round(start.row)
     const startC = Math.round(start.col)
@@ -147,7 +142,6 @@ const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: bool
 
     if (startR < 0 || startR >= GRID_ROWS || startC < 0 || startC >= GRID_COLS) return reachable
 
-    // FIXED: Explicit readonly type for queue
     let queue: readonly {r: number, c: number}[] = [{r: startR, c: startC}]
     reachable.add(`${startR},${startC}`)
 
@@ -170,7 +164,6 @@ const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: bool
 
                 if (!isHard && (!hasBomb || (nR === startR && nC === startC)) && (ignoreSoftBlocks || !isSoft)) {
                     reachable.add(`${nR},${nC}`)
-                    // STRICT COMPLIANCE: Use EffectArray.append
                     queue = EffectArray.append(queue, {r: nR, c: nC})
                 }
             }
@@ -180,7 +173,6 @@ const getReachableCells = (start: Position, model: Model, ignoreSoftBlocks: bool
     return reachable
 }
 
-// FIXED: Returns readonly Position[] to match Schema and ensure immutability
 const findShortestPath = (
     start: Position,
     goal: Position,
@@ -196,7 +188,6 @@ const findShortestPath = (
     const visited = new Set<string>()
     const key = (r: number, c: number) => `${r},${c}`
 
-    // FIXED: Explicit readonly type for queue and path
     let queue: readonly { r: number, c: number, path: readonly Position[] }[] = [{ r: sR, c: sC, path: [] }]
     visited.add(key(sR, sC))
 
@@ -231,7 +222,6 @@ const findShortestPath = (
 
                 if (walkable && isSafe) {
                     visited.add(key(nR, nC))
-                    // STRICT COMPLIANCE: Use EffectArray.append
                     const newPath = EffectArray.append(current.path, Position.make({ row: nR, col: nC }))
                     queue = EffectArray.append(queue, { r: nR, c: nC, path: newPath })
                 }
@@ -243,7 +233,6 @@ const findShortestPath = (
 
 const manhattanDistance = (p1: Position, p2: Position) => Math.abs(Math.round(p1.row) - Math.round(p2.row)) + Math.abs(Math.round(p1.col) - Math.round(p2.col))
 
-// FIXED: Returns readonly arrays to match Schema
 const updateBotAI = (model: Model): { players: readonly Player[], bombs: readonly Bomb[] } => {
     let newBombs: readonly Bomb[] = model.bombs
     const explosionEnded = EffectArray.some(model.explosions, e => (model.currentTime - e.createdAt) >= (FPS * EXPLOSION_DURATION) - 1)
@@ -284,7 +273,6 @@ const updateBotAI = (model: Model): { players: readonly Player[], bombs: readonl
             )
 
             if (!bombExists) {
-                // STRICT COMPLIANCE: Use EffectArray.append
                 newBombs = EffectArray.append(newBombs, Bomb.make({ position: bPos, plantedAt: model.currentTime, range: updated.bombRange, playerId: updated.id }))
                 updated = { ...updated, activeBombs: updated.activeBombs + 1 }
                 updated = performReevaluation(updated, { ...model, bombs: newBombs })
@@ -343,13 +331,11 @@ const executeBotState = (player: Player, model: Model): Player => {
 const findSafeGoal = (player: Player, model: Model): Position => {
     const reachable = getReachableCells(player.position, model, false)
 
-    // FIXED: Typed as readonly
     let safeSpots: readonly Position[] = []
 
     for (let r = 0; r < GRID_ROWS; r++) {
         for (let c = 0; c < GRID_COLS; c++) {
             if (reachable.has(`${r},${c}`) && !isCellDangerous(r, c, model, player)) {
-                // STRICT COMPLIANCE: Use EffectArray.append
                 safeSpots = EffectArray.append(safeSpots, Position.make({ row: r, col: c }))
             }
         }
@@ -373,12 +359,10 @@ const findPowerupGoal = (player: Player, model: Model): Option.Option<Position> 
 
     const reachable = getReachableCells(player.position, model, false)
 
-    // FIXED: Typed as readonly
     let powerups: readonly Position[] = []
     for (let r = 0; r < GRID_ROWS; r++) {
         for (let c = 0; c < GRID_COLS; c++) {
             if (model.grid[r][c].powerup && reachable.has(`${r},${c}`)) {
-                // STRICT COMPLIANCE: Use EffectArray.append
                 powerups = EffectArray.append(powerups, Position.make({ row: r, col: c }))
             }
         }
@@ -429,7 +413,6 @@ const findRandomGoal = (model: Model): Position => {
     return Position.make({ row: -1, col: -1 })
 }
 
-// FIXED: Accepts readonly array
 const dropOne = (arr: readonly Position[]) => EffectArray.filter(arr, (_, i) => i > 0)
 
 const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): Player => {
@@ -438,7 +421,6 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
     let nextPos = player.position
     let newDirection = player.direction
     let isMoving = false
-
     let newBotPath = player.botPath
     let newAiDirection = player.aiDirection
 
@@ -450,72 +432,65 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
         if (keys.has(k.left)) { dCol -= player.speed; newDirection = "left"; isMoving = true }
         if (keys.has(k.right)) { dCol += player.speed; newDirection = "right"; isMoving = true }
 
-        if (canMoveTo(nextPos.row + dRow, nextPos.col + dCol, player, model)) nextPos = Position.make({ row: nextPos.row + dRow, col: nextPos.col + dCol })
-        else if (dRow !== 0 && canMoveTo(nextPos.row + dRow, nextPos.col, player, model)) nextPos = Position.make({ row: nextPos.row + dRow, col: nextPos.col })
-        else if (dCol !== 0 && canMoveTo(nextPos.row, nextPos.col + dCol, player, model)) nextPos = Position.make({ row: nextPos.row, col: nextPos.col + dCol })
+        if (canMoveTo(nextPos.row + dRow, nextPos.col + dCol, player, model))
+            nextPos = Position.make({ row: nextPos.row + dRow, col: nextPos.col + dCol })
+        else if (dRow !== 0 && canMoveTo(nextPos.row + dRow, nextPos.col, player, model))
+            nextPos = Position.make({ row: nextPos.row + dRow, col: nextPos.col })
+        else if (dCol !== 0 && canMoveTo(nextPos.row, nextPos.col + dCol, player, model))
+            nextPos = Position.make({ row: nextPos.row, col: nextPos.col + dCol })
 
     } else {
-        if (player.botPath.length > 0) {
+        // BOT MOVEMENT LOGIC
+        if (EffectArray.isNonEmptyReadonlyArray(player.botPath)) {
             isMoving = true
             const target = player.botPath[0]
-            const dx = target.col - player.position.col
-            const dy = target.row - player.position.row
 
-            let moveX = 0, moveY = 0
+            // Calculate target center
+            const targetCenterR = Math.round(target.row)
+            const targetCenterC = Math.round(target.col)
 
-            if (Math.abs(dx) > Math.abs(dy)) {
-                newAiDirection = dx < 0 ? "left" : "right"
-                moveX = Math.sign(dx) * Math.min(Math.abs(dx), player.speed)
-
-                const rowCenter = Math.round(player.position.row)
-                const diffY = rowCenter - player.position.row
-                if (Math.abs(diffY) > 0.05) {
-                     moveY = Math.sign(diffY) * Math.min(Math.abs(diffY), player.speed * 0.5)
-                }
-            } else {
-                newAiDirection = dy < 0 ? "up" : "down"
-                moveY = Math.sign(dy) * Math.min(Math.abs(dy), player.speed)
-
-                const colCenter = Math.round(player.position.col)
-                const diffX = colCenter - player.position.col
-                if (Math.abs(diffX) > 0.05) {
-                    moveX = Math.sign(diffX) * Math.min(Math.abs(diffX), player.speed * 0.5)
-                }
-            }
-
-            if (newAiDirection) {
-                newDirection = newAiDirection
-            }
-
-            const dist = Math.sqrt(dx*dx + dy*dy)
+            const dx = targetCenterC - player.position.col
+            const dy = targetCenterR - player.position.row
+            const dist = Math.sqrt(dx * dx + dy * dy)
 
             if (dist <= player.speed) {
-                if (canMoveTo(target.row, target.col, player, model)) {
-                     nextPos = Position.make({ row: target.row, col: target.col })
-                     newBotPath = dropOne(player.botPath)
-                     if (newBotPath.length === 0) isMoving = false
+                if (canMoveTo(targetCenterR, targetCenterC, player, model)) {
+                    nextPos = Position.make({ row: targetCenterR, col: targetCenterC })
+                    newBotPath = dropOne(player.botPath)
+                    if (newBotPath.length === 0) isMoving = false
                 } else {
                     isMoving = false
                     newBotPath = []
                 }
             } else {
+                // Normal directional movement
+                let moveX = 0, moveY = 0
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    newAiDirection = dx < 0 ? "left" : "right"
+                    moveX = Math.sign(dx) * player.speed
+
+                    // Auto-align Row (Centering)
+                    const diffY = targetCenterR - player.position.row
+                    if (Math.abs(diffY) > 0.02) moveY = Math.sign(diffY) * Math.min(Math.abs(diffY), player.speed * 0.5)
+                } else {
+                    newAiDirection = dy < 0 ? "up" : "down"
+                    moveY = Math.sign(dy) * player.speed
+
+                    // Auto-align Column (Centering)
+                    const diffX = targetCenterC - player.position.col
+                    if (Math.abs(diffX) > 0.02) moveX = Math.sign(diffX) * Math.min(Math.abs(diffX), player.speed * 0.5)
+                }
+
+                if (newAiDirection) newDirection = newAiDirection
+
                 const nextR = player.position.row + moveY
                 const nextC = player.position.col + moveX
 
-                const nextR_snapped = Math.round(nextR * 100) / 100
-                const nextC_snapped = Math.round(nextC * 100) / 100
-
-                if (canMoveTo(nextR_snapped, nextC_snapped, player, model)) {
-                     nextPos = Position.make({ row: nextR_snapped, col: nextC_snapped })
+                if (canMoveTo(nextR, nextC, player, model)) {
+                    nextPos = Position.make({ row: nextR, col: nextC })
                 } else {
-                     if (moveX !== 0 && canMoveTo(player.position.row, nextC_snapped, player, model)) {
-                          nextPos = Position.make({ row: player.position.row, col: nextC_snapped })
-                     } else if (moveY !== 0 && canMoveTo(nextR_snapped, player.position.col, player, model)) {
-                          nextPos = Position.make({ row: nextR_snapped, col: player.position.col })
-                     } else {
-                         isMoving = false
-                         newBotPath = []
-                     }
+                    isMoving = false
+                    newBotPath = []
                 }
             }
         } else {
@@ -524,7 +499,14 @@ const updatePlayerMovement = (player: Player, keys: Set<string>, model: Model): 
         }
     }
 
-    return { ...player, position: nextPos, direction: newDirection, isMoving, botPath: newBotPath, aiDirection: newAiDirection }
+    return {
+        ...player,
+        position: nextPos,
+        direction: newDirection,
+        isMoving,
+        botPath: newBotPath,
+        aiDirection: newAiDirection
+    }
 }
 
 const canMoveTo = (row: number, col: number, player: Player, model: Model): boolean => {
@@ -602,7 +584,6 @@ const isCellDangerous = (r: number, c: number, model: Model, player: Player): bo
     }
 }
 
-// FIXED: Accepts readonly grid
 const isInExplosionRange = (tR: number, tC: number, bR: number, bC: number, range: number, grid: readonly (readonly Cell[])[]): boolean => {
     if (tR === bR && tC === bC) return true
     if (tR === bR && Math.abs(tC - bC) <= range) {
@@ -624,22 +605,6 @@ const isInExplosionRange = (tR: number, tC: number, bR: number, bC: number, rang
     return false
 }
 
-const updatePlayerTimers = (p: Player): Player => {
-    let u = p
-    if (u.hasVest) u = { ...u, vestTimer: Math.max(0, u.vestTimer - 1/FPS), hasVest: u.vestTimer > 1/FPS }
-
-    let { FireUp, BombUp, SpeedUp } = u.rainbowTimers
-    let active = false
-    if (FireUp > 0) { FireUp = Math.max(0, FireUp - 1/FPS); active = true }
-    if (BombUp > 0) { BombUp = Math.max(0, BombUp - 1/FPS); active = true }
-    if (SpeedUp > 0) { SpeedUp = Math.max(0, SpeedUp - 1/FPS); active = true }
-
-    if (!active && (u.rainbowTimers.FireUp > 0 || u.rainbowTimers.BombUp > 0 || u.rainbowTimers.SpeedUp > 0)) {
-        u = { ...u, bombRange: Math.max(1, u.bombRange - 3), maxBombs: Math.max(1, u.maxBombs - 3), speed: Math.max(BASE_SPEED, u.speed - SPEED_INCREMENT * 3) }
-    }
-    return { ...u, rainbowTimers: { FireUp, BombUp, SpeedUp } }
-}
-
 const checkPowerupCollection = (model: Model): Model => {
     let sfxPlayed = false;
 
@@ -658,8 +623,6 @@ const checkPowerupCollection = (model: Model): Model => {
             if (cell.powerup === "FireUp") u = { ...u, bombRange: u.bombRange + 1 }
             else if (cell.powerup === "BombUp") u = { ...u, maxBombs: u.maxBombs + 1 }
             else if (cell.powerup === "SpeedUp") u = { ...u, speed: u.speed + SPEED_INCREMENT }
-            else if (cell.powerup === "Rainbow") u = { ...u, rainbowTimers: { FireUp: 10, BombUp: 10, SpeedUp: 10 }, bombRange: u.bombRange + 3, maxBombs: u.maxBombs + 3, speed: u.speed + SPEED_INCREMENT * 3 }
-            else if (cell.powerup === "Vest") u = { ...u, hasVest: true, vestTimer: 10 }
             return u
         }
         return p
@@ -677,7 +640,6 @@ const checkPowerupCollection = (model: Model): Model => {
 const updateBombsAndExplosions = (model: Model): Model => {
     const activeExps = EffectArray.filter(model.explosions, e => (model.currentTime - e.createdAt) < FPS * EXPLOSION_DURATION)
 
-    // FIXED: Typed as readonly
     let explodedIndices: readonly number[] = []
     let newExps: readonly Explosion[] = []
     let explosionOccurred = false;
@@ -685,7 +647,6 @@ const updateBombsAndExplosions = (model: Model): Model => {
     EffectArray.forEach(model.bombs, (b, i) => {
         const r = Math.round(b.position.row), c = Math.round(b.position.col)
         if ((model.currentTime - b.plantedAt)/FPS >= BOMB_TIMER || model.grid[r][c].hasExplosion) {
-            // STRICT COMPLIANCE: Use EffectArray.append
             explodedIndices = EffectArray.append(explodedIndices, i)
             explosionOccurred = true;
 
@@ -696,12 +657,10 @@ const updateBombsAndExplosions = (model: Model): Model => {
                     if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) break
                     const cell = model.grid[nr][nc]
                     if (cell.type === "hard") break
-                    // STRICT COMPLIANCE: Use EffectArray.append
                     cells = EffectArray.append(cells, Position.make({ row: nr, col: nc }))
                     if (cell.type === "soft" && !cell.isDestroying) break
                 }
             }
-            // STRICT COMPLIANCE: Use EffectArray.append
             newExps = EffectArray.append(newExps, Explosion.make({ cells, createdAt: model.currentTime }))
         }
     })
@@ -722,7 +681,7 @@ const updateBombsAndExplosions = (model: Model): Model => {
                     let pup: any = null
                     if (spawn) {
                         const rnd = Math.random()
-                        pup = rnd < 0.3 ? "FireUp" : rnd < 0.6 ? "BombUp" : rnd < 0.9 ? "SpeedUp" : rnd < 0.95 ? "Rainbow" : "Vest"
+                        pup = rnd < 0.33 ? "FireUp" : rnd < 0.66 ? "BombUp" : "SpeedUp"
                     }
                     return Cell.make({ ...cell, hasExplosion: true, isDestroying: true, destroyTimer: FPS * DESTRUCTION_DELAY, powerup: pup })
                 }
@@ -765,7 +724,6 @@ const checkDeaths = (model: Model): Model => {
             }
         )
         if (hit) {
-            if (p.hasVest) return { ...p, hasVest: false, vestTimer: 0 }
             deathOccurred = true;
             return { ...p, isAlive: false, deathTime: model.currentTime }
         }
@@ -819,8 +777,8 @@ const handleStartNextRound = (model: Model): Model => ({
         const startP = initModel.players[i]
         return {
             ...p, position: startP.position, startPosition: startP.position,
-            isAlive: true, activeBombs: 0, speed: BASE_SPEED, bombRange: 1, maxBombs: 1, hasVest: false, vestTimer: 0,
-            rainbowTimers: { FireUp: 0, BombUp: 0, SpeedUp: 0 }, direction: "down", isMoving: false,
+            isAlive: true, activeBombs: 0, speed: BASE_SPEED, bombRange: 1, maxBombs: 1,
+            direction: "down", isMoving: false,
             botState: p.botType ? "WANDER" : null, botGoal: Position.make({ row: -1, col: -1 }), botPath: [], lastReevaluation: 0, aiDirection: null
         }
     }),

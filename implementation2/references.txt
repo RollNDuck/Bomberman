@@ -1,0 +1,30 @@
+----- PNG Reference List -----
+
+// Bombermen
+https://www.spriters-resource.com/snes/sbomber/asset/7887/
+
+// Bombs ++ Explosion
+https://www.spriters-resource.com/snes/sbomber2/asset/87957/
+
+// SoftBlock
+https://www.spriters-resource.com/pc_computer/mightyswitchforcehoseitdown/asset/67200/
+
+// Hard Block
+https://www.bing.com/images/search?view=detailV2&ccid=IRdqdxFv&id=79DE22A9D056AE505EFD75D8A95E90CB33A31CCD&thid=OIP.IRdqdxFvBUeNdXYPSbYPjQAAAA&mediaurl=https%3A%2F%2Fimg.itch.zone%2FaW1hZ2UvMTgwNjY2Lzg0NDMwNC5wbmc%3D%2F347x500%2FCMrOD4.png&exph=347&expw=347&q=metal+block+video+game+sqiuare&form=IRPRST&ck=45B04093118305931206E3B700B5B32B&selectedindex=12&itb=0&cw=1145&ch=601&ajaxhist=0&ajaxserp=0&pivotparams=insightsToken%3Dccid_ix54eKWb*cp_2E7073DE19CFD7A7D353D7DC19FB655C*mid_356F69D2744DC04750F2D767E73FEA952747C731*thid_OIP.ix54eKWbbBm1tt193qYGJwAAAA&vt=0&sim=11&iss=VSI&ajaxhist=0&ajaxserp=0
+
+// Floor
+https://pixelworlds.fandom.com/wiki/Sand
+
+----- SFX Reference List -----
+
+// BGM
+https://www.youtube.com/watch?v=zYmTPVLztwE&list=PLE44EA8AF6F095EB3&index=4
+
+// Explode or Detonation
+Arcade Video Game Explosion: https://mixkit.co/free-sound-effects/bomb/
+
+// Death
+Impact of a Strong Punch: https://mixkit.co/free-sound-effects/fight/
+
+// Powerup
+Retro Game Notification: https://mixkit.co/free-sound-effects/win/
